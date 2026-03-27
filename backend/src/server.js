@@ -1,12 +1,9 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-<<<<<<< HEAD
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-=======
->>>>>>> dd010e9 (fix server.js)
 import {
   insertInteraction,
   insertWebhookEvent,
@@ -15,48 +12,53 @@ import {
 } from './db.js';
 import { sendListMenu, sendOwnerRedirect, sendText, buildOwnerLink } from './meta.js';
 
-<<<<<<< HEAD
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const frontendDist = path.resolve(__dirname, '../../frontend/dist');
 const frontendIndex = path.join(frontendDist, 'index.html');
-const frontendAvailable = fs.existsSync(frontendIndex) && process.env.SERVE_FRONTEND !== 'false';
+const frontendAvailable =
+  fs.existsSync(frontendIndex) && process.env.SERVE_FRONTEND !== 'false';
 
-=======
->>>>>>> dd010e9 (fix server.js)
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || '0.0.0.0';
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '*';
-const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || 'change_me_verify_token';
+const VERIFY_TOKEN =
+  process.env.WEBHOOK_VERIFY_TOKEN || 'change_me_verify_token';
 
 app.set('trust proxy', 1);
 
-<<<<<<< HEAD
-const allowedOrigins = FRONTEND_ORIGIN === '*'
-  ? '*'
-  : FRONTEND_ORIGIN.split(',').map((value) => value.trim()).filter(Boolean);
+const allowedOrigins =
+  FRONTEND_ORIGIN === '*'
+    ? '*'
+    : FRONTEND_ORIGIN.split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
 
-app.use(cors({
-  origin(origin, callback) {
-    if (allowedOrigins === '*') {
-      return callback(null, true);
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (allowedOrigins === '*') {
+        return callback(null, true);
+      }
+
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
     }
+  })
+);
 
-    if (!origin || allowedOrigins.includes(origin)) {
-      return callback(null, true);
+app.use(
+  express.json({
+    limit: '2mb',
+    verify(req, _res, buffer) {
+      req.rawBody = buffer.toString('utf8');
     }
-
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
-  }
-}));
-
-app.use(express.json({
-  limit: '2mb',
-  verify(req, _res, buffer) {
-    req.rawBody = buffer.toString('utf8');
-  }
-}));
+  })
+);
 
 if (frontendAvailable) {
   app.use(express.static(frontendDist));
@@ -72,19 +74,15 @@ app.get('/', (_req, res) => {
     app: 'emme-estetica-backend',
     status: 'running',
     frontendServed: false,
-    message: 'Backend activo. El frontend está desplegado por separado o todavía no fue buildeado.'
-=======
-app.get('/', (_req, res) => {
-  res.json({
-    ok: true,
-    app: 'emme-estetica-backend',
-    status: 'running'
->>>>>>> dd010e9 (fix server.js)
+    message:
+      'Backend activo. El frontend está desplegado por separado o todavía no fue buildeado.'
   });
 });
 
 app.get('/health', (_req, res) => {
-  const missingEnv = ['WEBHOOK_VERIFY_TOKEN', 'OWNER_WHATSAPP_NUMBER'].filter((key) => !process.env[key]);
+  const missingEnv = ['WEBHOOK_VERIFY_TOKEN', 'OWNER_WHATSAPP_NUMBER'].filter(
+    (key) => !process.env[key]
+  );
 
   res.json({
     ok: true,
@@ -121,15 +119,12 @@ app.get('/webhook', (req, res) => {
     return res.status(200).send(challenge);
   }
 
-<<<<<<< HEAD
   insertWebhookEvent('webhook_verification_rejected', {
     mode,
     tokenReceived: token ? '[present]' : '[missing]',
     challenge: challenge ? '[present]' : '[missing]'
   });
 
-=======
->>>>>>> dd010e9 (fix server.js)
   return res.sendStatus(403);
 });
 
@@ -205,7 +200,16 @@ app.post('/webhook', async (req, res) => {
         const normalized = (textBody || '').toLowerCase();
         const asksForMenu =
           !normalized ||
-          ['hola', 'buenas', 'menu', 'menú', 'info', 'turno', 'turnos', 'opciones'].includes(normalized);
+          [
+            'hola',
+            'buenas',
+            'menu',
+            'menú',
+            'info',
+            'turno',
+            'turnos',
+            'opciones'
+          ].includes(normalized);
 
         insertInteraction({
           customerWaId: from,
@@ -245,7 +249,6 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-<<<<<<< HEAD
 app.use((error, _req, res, next) => {
   if (!error) {
     return next();
@@ -259,7 +262,11 @@ app.use((error, _req, res, next) => {
 });
 
 app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api') || req.path.startsWith('/webhook') || req.path === '/health') {
+  if (
+    req.path.startsWith('/api') ||
+    req.path.startsWith('/webhook') ||
+    req.path === '/health'
+  ) {
     return next();
   }
 
@@ -278,8 +285,3 @@ app.listen(PORT, HOST, () => {
   console.log(`Emme Estetica backend listening on http://${HOST}:${PORT}`);
   console.log(`Frontend bundled in backend: ${frontendAvailable ? 'yes' : 'no'}`);
 });
-=======
-app.listen(PORT, () => {
-  console.log(`Emme Estetica backend listening on port ${PORT}`);
-});
->>>>>>> dd010e9 (fix server.js)
