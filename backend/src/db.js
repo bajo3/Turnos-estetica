@@ -1,7 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const dataDir = path.resolve(process.cwd(), 'backend/data');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const dataDir = process.env.DATA_DIR
+  ? path.resolve(process.cwd(), process.env.DATA_DIR)
+  : path.resolve(__dirname, '../data');
 const dbPath = path.join(dataDir, 'db.json');
 
 fs.mkdirSync(dataDir, { recursive: true });
@@ -67,4 +72,8 @@ export function listInteractions(limit = 100) {
 export function listWebhookEvents(limit = 50) {
   const db = readDb();
   return db.webhookEvents.slice(0, limit);
+}
+
+export function getDbPath() {
+  return dbPath;
 }

@@ -1,6 +1,29 @@
 import { useEffect, useMemo, useState } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+function resolveApiBase() {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/$/, '');
+  }
+
+  if (typeof window !== 'undefined') {
+    const { hostname, origin } = window.location;
+
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://localhost:8080';
+    }
+
+    return origin;
+  }
+
+  return '';
+}
+
+const API_BASE = resolveApiBase();
+
+function buildApiUrl(path) {
+  return `${API_BASE}${path}`;
+}
 
 function SectionCard({ title, subtitle, children }) {
   return (
@@ -30,6 +53,18 @@ function InteractionRow({ item }) {
   );
 }
 
+async function parseResponse(response) {
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
+
+  if (!response.ok) {
+    const message = data?.error || data?.message || `Error HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return data;
+}
+
 export default function App() {
   const [config, setConfig] = useState(null);
   const [interactions, setInteractions] = useState([]);
@@ -43,20 +78,11 @@ export default function App() {
     async function load() {
       try {
         setLoading(true);
-        const [configRes, interactionsRes, eventsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/config`),
-          fetch(`${API_BASE}/api/interactions`),
-          fetch(`${API_BASE}/api/webhook-events`)
-        ]);
-
-        if (!configRes.ok || !interactionsRes.ok || !eventsRes.ok) {
-          throw new Error('No se pudo cargar el panel');
-        }
 
         const [configJson, interactionsJson, eventsJson] = await Promise.all([
-          configRes.json(),
-          interactionsRes.json(),
-          eventsRes.json()
+          fetch(buildApiUrl('/api/config')).then(parseResponse),
+          fetch(buildApiUrl('/api/interactions')).then(parseResponse),
+          fetch(buildApiUrl('/api/webhook-events')).then(parseResponse)
         ]);
 
         if (!active) return;
@@ -97,6 +123,12 @@ export default function App() {
             Bot de derivación para agendar, cambiar, cancelar y hablar con Emme.
             El panel guarda registros de interacciones y eventos webhook.
           </p>
+          {!import.meta.env.VITE_API_BASE_URL && typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? (
+            <p className="info">
+              Producción detectada sin <code>VITE_API_BASE_URL</code>. Si el frontend y el backend están en Railway por separado,
+              cargá esa variable con la URL pública del backend.
+            </p>
+          ) : null}
         </div>
         <a className="primary-link" href={config?.ownerLink || '#'} target="_blank" rel="noreferrer">
           Abrir WhatsApp de Emme
@@ -137,6 +169,10 @@ export default function App() {
           <div>
             <label>WhatsApp destino</label>
             <div>{config?.ownerWhatsAppNumber || '-'}</div>
+          </div>
+          <div>
+            <label>API base</label>
+            <div>{API_BASE || '(misma URL del frontend)'}</div>
           </div>
         </div>
       </SectionCard>

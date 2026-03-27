@@ -1,6 +1,6 @@
 const GRAPH_BASE = 'https://graph.facebook.com';
 
-function env(name) {
+function requiredEnv(name) {
   const value = process.env[name];
   if (!value) {
     throw new Error(`Missing required env: ${name}`);
@@ -8,8 +8,16 @@ function env(name) {
   return value;
 }
 
+function getOwnerNumber() {
+  return (process.env.OWNER_WHATSAPP_NUMBER || '').replace(/\D/g, '');
+}
+
 export function buildOwnerLink(optionLabel) {
-  const ownerNumber = env('OWNER_WHATSAPP_NUMBER').replace(/\D/g, '');
+  const ownerNumber = getOwnerNumber();
+  if (!ownerNumber) {
+    return '';
+  }
+
   const salonName = process.env.SALON_NAME || 'Emme Estetica';
   const ownerName = process.env.OWNER_DISPLAY_NAME || 'Emme';
   const text = encodeURIComponent(
@@ -71,6 +79,14 @@ export async function sendListMenu(to) {
 
 export async function sendOwnerRedirect(to, optionLabel) {
   const link = buildOwnerLink(optionLabel);
+
+  if (!link) {
+    return sendText(
+      to,
+      'Gracias por escribir. En este momento no pudimos generar el acceso directo al WhatsApp de Emme. Intentá nuevamente en unos minutos.'
+    );
+  }
+
   return sendWhatsAppMessage({
     messaging_product: 'whatsapp',
     to,
@@ -112,22 +128,19 @@ export async function sendText(to, text) {
 
 async function sendWhatsAppMessage(payload) {
   const version = process.env.META_API_VERSION || 'v23.0';
-  const phoneNumberId = env('META_PHONE_NUMBER_ID');
-  const accessToken = env('META_ACCESS_TOKEN');
+  const phoneNumberId = requiredEnv('META_PHONE_NUMBER_ID');
+  const accessToken = requiredEnv('META_ACCESS_TOKEN');
 
-  const response = await fetch(
-    `${GRAPH_BASE}/${version}/${phoneNumberId}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    }
-  );
+  const response = await fetch(`${GRAPH_BASE}/${version}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
 
-  const data = await response.json();
+  const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(`Meta send failed: ${response.status} ${JSON.stringify(data)}`);
   }

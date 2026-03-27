@@ -116,3 +116,29 @@ npm start
 - Plantillas aprobadas para seguimientos fuera de ventana
 - Dashboard de métricas
 
+
+
+## Deploy en Railway separado (recomendado)
+
+Este repo ya incluye ajustes para deployar **frontend** y **backend** como servicios distintos en Railway.
+
+### Backend
+
+- Root Directory: `backend`
+- Variable clave: `SERVE_FRONTEND=false`
+- Callback URL del webhook: `https://TU-BACKEND.up.railway.app/webhook`
+
+### Frontend
+
+- Root Directory: `frontend`
+- Variable clave: `VITE_API_BASE_URL=https://TU-BACKEND.up.railway.app`
+
+### Nota importante sobre el 502
+
+En Railway, un `502 Bad Gateway` suele significar que el proceso no está escuchando en `0.0.0.0` y en el `PORT` inyectado, o que el dominio apunta a un puerto incorrecto. Railway lo documenta así en su guía de troubleshooting.
+
+### Nota importante sobre el webhook de Meta
+
+Meta verifica el webhook con un `GET` al callback URL y espera `200` devolviendo exactamente el `hub.challenge` cuando el verify token coincide.
+
+Más detalle operativo en `RAILWAY_DEPLOY.md`.

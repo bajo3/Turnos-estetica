@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -14,19 +15,70 @@ import { sendListMenu, sendOwnerRedirect, sendText, buildOwnerLink } from './met
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const frontendDist = path.resolve(__dirname, '../../frontend/dist');
+const frontendIndex = path.join(frontendDist, 'index.html');
+const frontendAvailable = fs.existsSync(frontendIndex) && process.env.SERVE_FRONTEND !== 'false';
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = Number(process.env.PORT || 8080);
+const HOST = process.env.HOST || '0.0.0.0';
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '*';
 const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || 'change_me_verify_token';
 
-app.use(cors({ origin: FRONTEND_ORIGIN === '*' ? true : FRONTEND_ORIGIN }));
-app.use(express.json({ limit: '2mb' }));
+app.set('trust proxy', 1);
 
-app.use(express.static(frontendDist));
+const allowedOrigins = FRONTEND_ORIGIN === '*'
+  ? '*'
+  : FRONTEND_ORIGIN.split(',').map((value) => value.trim()).filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (allowedOrigins === '*') {
+      return callback(null, true);
+    }
+
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  }
+}));
+
+app.use(express.json({
+  limit: '2mb',
+  verify(req, _res, buffer) {
+    req.rawBody = buffer.toString('utf8');
+  }
+}));
+
+if (frontendAvailable) {
+  app.use(express.static(frontendDist));
+}
+
+app.get('/', (_req, res) => {
+  if (frontendAvailable) {
+    return res.sendFile(frontendIndex);
+  }
+
+  return res.json({
+    ok: true,
+    app: 'emme-estetica-backend',
+    status: 'running',
+    frontendServed: false,
+    message: 'Backend activo. El frontend está desplegado por separado o todavía no fue buildeado.'
+  });
+});
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, app: 'emme-estetica-backend' });
+  const missingEnv = ['WEBHOOK_VERIFY_TOKEN', 'OWNER_WHATSAPP_NUMBER'].filter((key) => !process.env[key]);
+
+  res.json({
+    ok: true,
+    app: 'emme-estetica-backend',
+    frontendServed: frontendAvailable,
+    missingEnv,
+    uptimeSeconds: Math.round(process.uptime())
+  });
 });
 
 app.get('/api/config', (_req, res) => {
@@ -54,6 +106,13 @@ app.get('/webhook', (req, res) => {
   if (mode === 'subscribe' && token === VERIFY_TOKEN) {
     return res.status(200).send(challenge);
   }
+
+  insertWebhookEvent('webhook_verification_rejected', {
+    mode,
+    tokenReceived: token ? '[present]' : '[missing]',
+    challenge: challenge ? '[present]' : '[missing]'
+  });
+
   return res.sendStatus(403);
 });
 
@@ -90,6 +149,10 @@ app.post('/webhook', async (req, res) => {
         const wamid = message.id;
         const interactive = message.interactive;
         const textBody = message.text?.body?.trim();
+
+        if (!from) {
+          continue;
+        }
 
         if (interactive?.type === 'list_reply') {
           const optionMap = {
@@ -151,19 +214,42 @@ app.post('/webhook', async (req, res) => {
     console.error('Webhook processing error:', error);
     insertWebhookEvent('webhook_error', {
       message: error.message,
-      stack: error.stack
+      stack: error.stack,
+      rawBody: req.rawBody || null
     });
     return res.sendStatus(200);
   }
+});
+
+app.use((error, _req, res, next) => {
+  if (!error) {
+    return next();
+  }
+
+  console.error('Request error:', error);
+  return res.status(500).json({
+    ok: false,
+    error: error.message || 'Unexpected server error'
+  });
 });
 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api') || req.path.startsWith('/webhook') || req.path === '/health') {
     return next();
   }
-  return res.sendFile(path.join(frontendDist, 'index.html'));
+
+  if (frontendAvailable) {
+    return res.sendFile(frontendIndex);
+  }
+
+  return res.status(404).json({
+    ok: false,
+    error: 'Route not found',
+    path: req.path
+  });
 });
 
-app.listen(PORT, () => {
-  console.log(`Emme Estetica backend listening on port ${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`Emme Estetica backend listening on http://${HOST}:${PORT}`);
+  console.log(`Frontend bundled in backend: ${frontendAvailable ? 'yes' : 'no'}`);
 });
