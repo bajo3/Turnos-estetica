@@ -1,9 +1,12 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+<<<<<<< HEAD
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+=======
+>>>>>>> dd010e9 (fix server.js)
 import {
   insertInteraction,
   insertWebhookEvent,
@@ -12,12 +15,15 @@ import {
 } from './db.js';
 import { sendListMenu, sendOwnerRedirect, sendText, buildOwnerLink } from './meta.js';
 
+<<<<<<< HEAD
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const frontendDist = path.resolve(__dirname, '../../frontend/dist');
 const frontendIndex = path.join(frontendDist, 'index.html');
 const frontendAvailable = fs.existsSync(frontendIndex) && process.env.SERVE_FRONTEND !== 'false';
 
+=======
+>>>>>>> dd010e9 (fix server.js)
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -26,6 +32,7 @@ const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || 'change_me_verify_token
 
 app.set('trust proxy', 1);
 
+<<<<<<< HEAD
 const allowedOrigins = FRONTEND_ORIGIN === '*'
   ? '*'
   : FRONTEND_ORIGIN.split(',').map((value) => value.trim()).filter(Boolean);
@@ -66,6 +73,13 @@ app.get('/', (_req, res) => {
     status: 'running',
     frontendServed: false,
     message: 'Backend activo. El frontend está desplegado por separado o todavía no fue buildeado.'
+=======
+app.get('/', (_req, res) => {
+  res.json({
+    ok: true,
+    app: 'emme-estetica-backend',
+    status: 'running'
+>>>>>>> dd010e9 (fix server.js)
   });
 });
 
@@ -107,12 +121,15 @@ app.get('/webhook', (req, res) => {
     return res.status(200).send(challenge);
   }
 
+<<<<<<< HEAD
   insertWebhookEvent('webhook_verification_rejected', {
     mode,
     tokenReceived: token ? '[present]' : '[missing]',
     challenge: challenge ? '[present]' : '[missing]'
   });
 
+=======
+>>>>>>> dd010e9 (fix server.js)
   return res.sendStatus(403);
 });
 
@@ -161,7 +178,12 @@ app.post('/webhook', async (req, res) => {
             cancelar_turno: 'Cancelar turno',
             hablar_emme: 'Hablar con Emme'
           };
-          const selectedOption = optionMap[interactive.list_reply?.id] || interactive.list_reply?.title || 'Opción';
+
+          const selectedOption =
+            optionMap[interactive.list_reply?.id] ||
+            interactive.list_reply?.title ||
+            'Opción';
+
           const ownerLink = buildOwnerLink(selectedOption);
 
           insertInteraction({
@@ -212,15 +234,18 @@ app.post('/webhook', async (req, res) => {
     return res.sendStatus(200);
   } catch (error) {
     console.error('Webhook processing error:', error);
+
     insertWebhookEvent('webhook_error', {
       message: error.message,
       stack: error.stack,
       rawBody: req.rawBody || null
     });
+
     return res.sendStatus(200);
   }
 });
 
+<<<<<<< HEAD
 app.use((error, _req, res, next) => {
   if (!error) {
     return next();
@@ -253,3 +278,8 @@ app.listen(PORT, HOST, () => {
   console.log(`Emme Estetica backend listening on http://${HOST}:${PORT}`);
   console.log(`Frontend bundled in backend: ${frontendAvailable ? 'yes' : 'no'}`);
 });
+=======
+app.listen(PORT, () => {
+  console.log(`Emme Estetica backend listening on port ${PORT}`);
+});
+>>>>>>> dd010e9 (fix server.js)
