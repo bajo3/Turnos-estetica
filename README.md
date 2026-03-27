@@ -2,24 +2,25 @@
 
 MVP full stack para **Emme Estetica**.
 
-## Qué hace
+## Qué hace ahora
 
 - Recibe mensajes entrantes desde **WhatsApp Cloud API** por webhook.
 - Muestra un menú para:
   - Agendar turno
   - Cambiar turno
   - Cancelar turno
+  - Ver horarios
   - Hablar con Emme
-- Cuando la clienta elige una opción, el bot **no agenda**: deriva a otro WhatsApp con mensaje prellenado para que **Emme** coordine manualmente.
-- Guarda registros de interacciones y webhooks en un archivo **JSON local**.
-- Expone un panel web simple para ver logs, interacciones y configuración activa.
+- Guarda **mensajes entrantes, mensajes salientes del bot y estados de Meta** en un archivo JSON local.
+- Expone un panel web para:
+  - ver conversaciones completas,
+  - auditar exactamente lo que manda el bot,
+  - editar días y horarios,
+  - elegir si “Agendar turno” deriva a WhatsApp o manda un **link de agenda online**.
 
 ## Decisión técnica importante
 
-WhatsApp **reply buttons** admiten hasta **3 opciones**, así que para estas 4 acciones el MVP usa un **interactive list message**. Si más adelante querés, se puede pasar a:
-
-- 3 botones + 1 mensaje adicional, o
-- un flujo de varios pasos.
+WhatsApp **reply buttons** admiten hasta **3 opciones**, así que el MVP usa un **interactive list message**.
 
 ## Stack
 
@@ -49,6 +50,17 @@ cp .env.example .env
 - `APP_BASE_URL`: URL pública del backend (por ejemplo Railway)
 - `OWNER_WHATSAPP_NUMBER`: número al que querés derivar, ya cargado con `5492494514175`
 
+### Configuración desde el panel
+
+No necesitás nuevas variables para horarios o agenda online. Eso ahora se guarda en el JSON interno del backend desde el panel:
+
+- zona horaria,
+- días activos,
+- horarios por día,
+- modo de agenda,
+- link de agenda online,
+- texto del botón y mensaje automático.
+
 ## Desarrollo local
 
 ```bash
@@ -77,6 +89,8 @@ npm start
 
 - `GET /health`
 - `GET /api/config`
+- `GET /api/settings`
+- `PUT /api/settings`
 - `GET /api/interactions`
 - `GET /api/webhook-events`
 
@@ -93,12 +107,25 @@ npm start
 5. Suscribirse al campo `messages`.
 6. Poner el número Cloud API en producción según tu cuenta WABA.
 
+## Cómo usar la agenda online más simple
+
+La integración más liviana para este MVP es:
+
+1. crear tu página de reservas en Google Calendar,
+2. copiar el link público,
+3. pegarlo en el panel,
+4. cambiar el modo a **“Usar link de agenda online”**.
+
+Desde ese momento, cuando la clienta toque **“Agendar turno”**, el bot manda un botón con ese enlace.
+
 ## Flujo del MVP
 
 1. La clienta escribe “hola” o cualquier mensaje.
-2. El backend envía una lista interactiva con 4 opciones.
+2. El backend envía una lista interactiva.
 3. La clienta elige una opción.
-4. El backend responde con un botón que abre el WhatsApp de Emme con texto prellenado.
+4. El backend responde con:
+   - link al WhatsApp de Emme, o
+   - link de agenda online, según configuración.
 5. Se guarda registro local.
 6. Cuando Meta envía estados del mensaje, también quedan guardados.
 
@@ -106,17 +133,15 @@ npm start
 
 - El archivo JSON sirve para validar el flujo. Para producción conviene migrar a Postgres.
 - No hay autenticación en el panel porque es MVP. Antes de producción, agregá login o al menos Basic Auth.
-- No hay lógica de agenda ni calendario: este bot solo **captura, deriva y registra**.
+- La agenda online por link evita OAuth y reduce mucho la complejidad.
 
 ## Próximos pasos recomendados
 
 - Login básico para el panel
 - Postgres en Railway
-- Etiquetas por servicio
-- Plantillas aprobadas para seguimientos fuera de ventana
-- Dashboard de métricas
-
-
+- Servicios/precios
+- Bloqueo de slots por duración real
+- Google Calendar OAuth solo si necesitás crear eventos desde tu backend
 
 ## Deploy en Railway separado (recomendado)
 
@@ -132,10 +157,6 @@ Este repo ya incluye ajustes para deployar **frontend** y **backend** como servi
 
 - Root Directory: `frontend`
 - Variable clave: `VITE_API_BASE_URL=https://TU-BACKEND.up.railway.app`
-
-### Nota importante sobre el 502
-
-En Railway, un `502 Bad Gateway` suele significar que el proceso no está escuchando en `0.0.0.0` y en el `PORT` inyectado, o que el dominio apunta a un puerto incorrecto. Railway lo documenta así en su guía de troubleshooting.
 
 ### Nota importante sobre el webhook de Meta
 

@@ -5,12 +5,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  getSettings,
   insertInteraction,
   insertWebhookEvent,
   listInteractions,
-  listWebhookEvents
+  listWebhookEvents,
+  updateSettings
 } from './db.js';
-import { sendListMenu, sendOwnerRedirect, sendText, buildOwnerLink } from './meta.js';
+import {
+  buildOwnerLink,
+  sendBookingLink,
+  sendListMenu,
+  sendOwnerRedirect,
+  sendText
+} from './meta.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,6 +42,73 @@ const allowedOrigins =
     : FRONTEND_ORIGIN.split(',')
         .map((value) => value.trim())
         .filter(Boolean);
+
+function bookingEnabled(settings) {
+  return (
+    settings?.booking?.mode === 'booking_link' &&
+    Boolean(settings?.booking?.bookingPageUrl)
+  );
+}
+
+function formatScheduleSummary(settings) {
+  const schedule = settings?.schedule || [];
+  const enabledDays = schedule.filter((day) => day.enabled);
+
+  if (!enabledDays.length) {
+    return 'Horarios no configurados todavía.';
+  }
+
+  return enabledDays
+    .map((day) => `${day.label}: ${day.start} a ${day.end}`)
+    .join(' · ');
+}
+
+function formatScheduleMessage(settings) {
+  const summary = formatScheduleSummary(settings);
+  const timezone = settings?.timezone ? ` (${settings.timezone})` : '';
+  return `Horarios de atención${timezone}:\n${summary}`;
+}
+
+function buildConfigResponse() {
+  const settings = getSettings();
+  return {
+    salonName: process.env.SALON_NAME || 'Emme Estetica',
+    ownerDisplayName: process.env.OWNER_DISPLAY_NAME || 'Emme',
+    ownerWhatsAppNumber: process.env.OWNER_WHATSAPP_NUMBER || '',
+    ownerLink: buildOwnerLink('Hablar con Emme'),
+    settings,
+    scheduleSummary: formatScheduleSummary(settings),
+    bookingEnabled: bookingEnabled(settings),
+    bookingMode: settings.booking.mode,
+    bookingPageUrl: settings.booking.bookingPageUrl || ''
+  };
+}
+
+async function storeBotMessage({ to, customerName, selectedOption = null, ownerLink = null, result }) {
+  if (!result) {
+    return;
+  }
+
+  insertInteraction({
+    customerWaId: to,
+    customerName,
+    messageType: result.messageType || 'text',
+    selectedOption,
+    ownerLink: ownerLink || result.ownerLink || null,
+    messagePreview: result.preview || null,
+    messageBody: result.bodyText || result.preview || null,
+    wamid: result?.response?.messages?.[0]?.id || null,
+    direction: 'outbound_bot',
+    status: 'sent',
+    meta: result.response || null
+  });
+}
+
+async function sendAndStore({ to, customerName, selectedOption, ownerLink, action }) {
+  const result = await action();
+  await storeBotMessage({ to, customerName, selectedOption, ownerLink, result });
+  return result;
+}
 
 app.use(
   cors({
@@ -80,6 +155,7 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/health', (_req, res) => {
+  const settings = getSettings();
   const missingEnv = ['WEBHOOK_VERIFY_TOKEN', 'OWNER_WHATSAPP_NUMBER'].filter(
     (key) => !process.env[key]
   );
@@ -89,25 +165,45 @@ app.get('/health', (_req, res) => {
     app: 'emme-estetica-backend',
     frontendServed: frontendAvailable,
     missingEnv,
+    bookingEnabled: bookingEnabled(settings),
+    bookingMode: settings.booking.mode,
     uptimeSeconds: Math.round(process.uptime())
   });
 });
 
 app.get('/api/config', (_req, res) => {
-  res.json({
-    salonName: process.env.SALON_NAME || 'Emme Estetica',
-    ownerDisplayName: process.env.OWNER_DISPLAY_NAME || 'Emme',
-    ownerWhatsAppNumber: process.env.OWNER_WHATSAPP_NUMBER || '',
-    ownerLink: buildOwnerLink('Hablar con Emme')
-  });
+  res.json(buildConfigResponse());
 });
 
-app.get('/api/interactions', (_req, res) => {
-  res.json({ items: listInteractions(200) });
+app.get('/api/settings', (_req, res) => {
+  res.json(getSettings());
 });
 
-app.get('/api/webhook-events', (_req, res) => {
-  res.json({ items: listWebhookEvents(100) });
+app.put('/api/settings', (req, res) => {
+  try {
+    const next = updateSettings(req.body || {});
+    insertWebhookEvent('settings_updated', {
+      source: 'dashboard',
+      bookingMode: next.booking.mode,
+      bookingPageConfigured: Boolean(next.booking.bookingPageUrl)
+    });
+    return res.json({ ok: true, settings: next, scheduleSummary: formatScheduleSummary(next) });
+  } catch (error) {
+    return res.status(400).json({
+      ok: false,
+      error: error.message || 'No se pudieron guardar los ajustes.'
+    });
+  }
+});
+
+app.get('/api/interactions', (req, res) => {
+  const limit = Math.min(Number(req.query.limit || 400), 1000);
+  res.json({ items: listInteractions(limit) });
+});
+
+app.get('/api/webhook-events', (req, res) => {
+  const limit = Math.min(Number(req.query.limit || 100), 500);
+  res.json({ items: listWebhookEvents(limit) });
 });
 
 app.get('/webhook', (req, res) => {
@@ -136,6 +232,7 @@ app.post('/webhook', async (req, res) => {
     const changes = body?.entry?.flatMap((entry) => entry.changes || []) || [];
 
     for (const change of changes) {
+      const settings = getSettings();
       const value = change.value || {};
       const contacts = value.contacts || [];
       const messages = value.messages || [];
@@ -152,7 +249,8 @@ app.post('/webhook', async (req, res) => {
           messagePreview: `${status.status || 'unknown'} (${status.id || 'no-id'})`,
           wamid: status.id || null,
           direction: 'outbound_status',
-          status: status.status || 'unknown'
+          status: status.status || 'unknown',
+          meta: status
         });
       }
 
@@ -171,7 +269,8 @@ app.post('/webhook', async (req, res) => {
             agendar_turno: 'Agendar turno',
             cambiar_turno: 'Cambiar turno',
             cancelar_turno: 'Cancelar turno',
-            hablar_emme: 'Hablar con Emme'
+            hablar_emme: 'Hablar con Emme',
+            ver_horarios: 'Ver horarios'
           };
 
           const selectedOption =
@@ -190,10 +289,46 @@ app.post('/webhook', async (req, res) => {
             messagePreview: interactive.list_reply?.title || selectedOption,
             wamid,
             direction: 'inbound',
-            status: 'received'
+            status: 'received',
+            meta: interactive.list_reply || null
           });
 
-          await sendOwnerRedirect(from, selectedOption);
+          if (interactive.list_reply?.id === 'agendar_turno' && bookingEnabled(settings)) {
+            await sendAndStore({
+              to: from,
+              customerName,
+              selectedOption,
+              action: () =>
+                sendBookingLink(from, {
+                  url: settings.booking.bookingPageUrl,
+                  label: settings.booking.bookingPageLabel,
+                  bodyText: `${settings.booking.bookingMessage}${
+                    settings.bot.includeScheduleInReplies
+                      ? `\n\n${formatScheduleMessage(settings)}`
+                      : ''
+                  }`
+                })
+            });
+            continue;
+          }
+
+          if (interactive.list_reply?.id === 'ver_horarios') {
+            await sendAndStore({
+              to: from,
+              customerName,
+              selectedOption,
+              action: () => sendText(from, formatScheduleMessage(settings))
+            });
+            continue;
+          }
+
+          await sendAndStore({
+            to: from,
+            customerName,
+            selectedOption,
+            ownerLink,
+            action: () => sendOwnerRedirect(from, selectedOption)
+          });
           continue;
         }
 
@@ -210,6 +345,7 @@ app.post('/webhook', async (req, res) => {
             'turnos',
             'opciones'
           ].includes(normalized);
+        const asksForSchedule = ['horario', 'horarios', 'dias', 'días', 'disponibilidad'].includes(normalized);
 
         insertInteraction({
           customerWaId: from,
@@ -218,19 +354,48 @@ app.post('/webhook', async (req, res) => {
           selectedOption: null,
           ownerLink: null,
           messagePreview: textBody || `[${message.type || 'unknown'}]`,
+          messageBody: textBody || `[${message.type || 'unknown'}]`,
           wamid,
           direction: 'inbound',
-          status: 'received'
+          status: 'received',
+          meta: message
         });
 
+        if (asksForSchedule) {
+          await sendAndStore({
+            to: from,
+            customerName,
+            action: () => sendText(from, formatScheduleMessage(settings))
+          });
+          await sendAndStore({
+            to: from,
+            customerName,
+            action: () => sendListMenu(from, settings)
+          });
+          continue;
+        }
+
         if (asksForMenu) {
-          await sendListMenu(from);
+          await sendAndStore({
+            to: from,
+            customerName,
+            action: () => sendListMenu(from, settings)
+          });
         } else {
-          await sendText(
-            from,
-            'Gracias por escribir a Emme Estetica. Tocá el menú que te mandamos para agendar, cambiar, cancelar o hablar con Emme.'
-          );
-          await sendListMenu(from);
+          await sendAndStore({
+            to: from,
+            customerName,
+            action: () =>
+              sendText(
+                from,
+                'Gracias por escribir a Emme Estetica. Tocá el menú que te mandamos para agendar, cambiar, cancelar, ver horarios o hablar con Emme.'
+              )
+          });
+          await sendAndStore({
+            to: from,
+            customerName,
+            action: () => sendListMenu(from, settings)
+          });
         }
       }
     }

@@ -19,12 +19,33 @@ body {
 }
 
 button,
-a {
+a,
+input,
+select,
+textarea {
   font: inherit;
 }
 
+button {
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid rgba(145, 76, 111, 0.18);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #fff;
+}
+
+textarea {
+  resize: vertical;
+}
+
 .page {
-  max-width: 1180px;
+  max-width: 1240px;
   margin: 0 auto;
   padding: 32px 20px 64px;
 }
@@ -36,7 +57,7 @@ a {
   gap: 20px;
   padding: 28px;
   border-radius: 28px;
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(145, 76, 111, 0.12);
   box-shadow: 0 18px 45px rgba(80, 29, 58, 0.08);
   margin-bottom: 24px;
@@ -54,6 +75,12 @@ a {
   color: #5e4d58;
 }
 
+.hero-actions {
+  display: grid;
+  gap: 12px;
+  min-width: 250px;
+}
+
 .eyebrow {
   display: inline-flex;
   padding: 6px 10px;
@@ -66,8 +93,9 @@ a {
   text-transform: uppercase;
 }
 
-.primary-link {
-  flex-shrink: 0;
+.primary-link,
+.secondary-link,
+.primary-button {
   text-decoration: none;
   display: inline-flex;
   align-items: center;
@@ -75,14 +103,25 @@ a {
   min-width: 220px;
   padding: 14px 18px;
   border-radius: 16px;
+  font-weight: 700;
+  border: 0;
+}
+
+.primary-link,
+.primary-button {
   background: #7c325c;
   color: white;
-  font-weight: 700;
   box-shadow: 0 10px 30px rgba(124, 50, 92, 0.25);
 }
 
+.secondary-link {
+  background: rgba(124, 50, 92, 0.08);
+  color: #7c325c;
+}
+
 .stats-grid,
-.config-grid {
+.config-grid,
+.settings-grid {
   display: grid;
   gap: 16px;
 }
@@ -94,7 +133,7 @@ a {
 
 .stat-card,
 .card {
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(145, 76, 111, 0.12);
   box-shadow: 0 18px 45px rgba(80, 29, 58, 0.06);
 }
@@ -120,6 +159,13 @@ a {
   margin-bottom: 20px;
 }
 
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .card-header h2 {
   margin: 0 0 4px;
   font-size: 1.25rem;
@@ -130,17 +176,28 @@ a {
   color: #6e5b64;
 }
 
-.config-grid {
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+.card-actions {
+  flex-shrink: 0;
 }
 
-.config-grid label {
+.config-grid,
+.settings-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.config-grid label,
+.settings-form label,
+.day-card label {
   display: block;
   font-size: 0.82rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #8f7280;
   margin-bottom: 6px;
+}
+
+.field-span-2 {
+  grid-column: span 2;
 }
 
 .table-wrap {
@@ -183,20 +240,34 @@ th {
   color: #6d5160;
 }
 
+.info.compact,
+.error.compact {
+  margin: 0;
+}
+
 .error {
   background: #ffe7e7;
   color: #8b2a2a;
 }
 
-.events-list {
+.events-list,
+.bot-message-list {
   display: grid;
   gap: 12px;
 }
 
-.event-item {
+.event-item,
+.bot-message-item,
+.recommendation-box,
+.day-card,
+.conversation-item,
+.message-bubble {
   border: 1px solid rgba(145, 76, 111, 0.12);
   border-radius: 18px;
   background: #fff;
+}
+
+.event-item {
   overflow: hidden;
 }
 
@@ -218,12 +289,236 @@ th {
   color: #5b4f56;
 }
 
+.recommendation-box {
+  padding: 16px;
+  margin-bottom: 18px;
+  background: rgba(248, 237, 244, 0.8);
+}
+
+.recommendation-box p {
+  margin: 6px 0 0;
+  color: #5e4d58;
+}
+
+.settings-form {
+  display: grid;
+  gap: 20px;
+}
+
+.schedule-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.schedule-editor-header h3 {
+  margin: 0 0 4px;
+}
+
+.schedule-editor-header p {
+  margin: 0;
+  color: #6e5b64;
+}
+
+.days-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.day-card {
+  padding: 16px;
+}
+
+.day-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.toggle-inline {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0 !important;
+}
+
+.toggle-inline input {
+  width: auto;
+  padding: 0;
+}
+
+.day-times {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.settings-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.save-message {
+  color: #6b4f5d;
+  font-weight: 600;
+}
+
+.conversation-layout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.conversation-sidebar {
+  display: grid;
+  gap: 10px;
+  max-height: 680px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.conversation-item {
+  text-align: left;
+  padding: 14px 16px;
+}
+
+.conversation-item.active {
+  border-color: rgba(124, 50, 92, 0.4);
+  box-shadow: inset 0 0 0 1px rgba(124, 50, 92, 0.12);
+}
+
+.conversation-item strong,
+.bot-message-item strong {
+  display: block;
+}
+
+.conversation-item span,
+.bot-message-item span,
+.message-bubble-top span,
+.conversation-thread-header span {
+  color: #7d6874;
+  font-size: 0.92rem;
+}
+
+.conversation-item p,
+.bot-message-item p,
+.message-bubble p {
+  margin: 6px 0 0;
+  color: #4e4148;
+}
+
+.conversation-thread {
+  border: 1px solid rgba(145, 76, 111, 0.12);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,249,252,0.9));
+  padding: 16px;
+  min-height: 420px;
+}
+
+.conversation-thread-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.bubble-list {
+  display: grid;
+  gap: 12px;
+}
+
+.message-bubble {
+  padding: 14px 16px;
+}
+
+.message-bubble-top,
+.bot-message-item > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.message-bubble-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.message-bubble-meta span {
+  background: rgba(124, 50, 92, 0.08);
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.84rem;
+  color: #6d5160;
+}
+
+.message-bubble a {
+  display: inline-flex;
+  margin-top: 10px;
+  color: #7c325c;
+  font-weight: 700;
+}
+
+.bubble-inbound {
+  margin-right: 44px;
+  background: #fff;
+}
+
+.bubble-bot {
+  margin-left: 44px;
+  background: #fdf0f7;
+}
+
+.bubble-status {
+  background: #f8edf4;
+}
+
+.bot-message-item {
+  padding: 14px 16px;
+}
+
+@media (max-width: 1024px) {
+  .field-span-2 {
+    grid-column: auto;
+  }
+
+  .conversation-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 840px) {
   .hero {
     flex-direction: column;
   }
 
-  .primary-link {
+  .hero-actions,
+  .primary-link,
+  .secondary-link,
+  .primary-button {
     width: 100%;
+  }
+
+  .message-bubble-top,
+  .bot-message-item > div,
+  .card-header,
+  .conversation-thread-header,
+  .day-card-top {
+    flex-direction: column;
+  }
+
+  .bubble-inbound,
+  .bubble-bot {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .day-times {
+    grid-template-columns: 1fr;
   }
 }
