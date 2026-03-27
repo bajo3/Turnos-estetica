@@ -1,38 +1,40 @@
-# Emme Estetica · MVP WhatsApp Cloud API
+# Emme Estetica · Evolution QR + Google Calendar
 
-MVP full stack para **Emme Estetica**.
+MVP full stack para conectar WhatsApp por **Evolution API + QR** y tomar a **Google Calendar** como fuente de verdad de los turnos.
 
-## Qué hace ahora
+## Qué hace
 
-- Recibe mensajes entrantes desde **WhatsApp Cloud API** por webhook.
-- Muestra un menú para:
-  - Agendar turno
-  - Cambiar turno
-  - Cancelar turno
-  - Ver horarios
-  - Hablar con Emme
-- Guarda **mensajes entrantes, mensajes salientes del bot y estados de Meta** en un archivo JSON local.
-- Expone un panel web para:
-  - ver conversaciones completas,
-  - auditar exactamente lo que manda el bot,
-  - editar días y horarios,
-  - elegir si “Agendar turno” deriva a WhatsApp o manda un **link de agenda online**.
+- Conecta un número de WhatsApp mediante **Evolution API**.
+- Guarda mensajes entrantes y salientes en un JSON local.
+- Conecta **Google Calendar** por OAuth 2.0.
+- Sincroniza eventos del calendario y los muestra en el panel.
+- Detecta turnos próximos y manda **recordatorios por WhatsApp**.
+- Respeta reglas operativas:
+  - solo recordatorios,
+  - solo contactos existentes si así lo configurás,
+  - límite diario,
+  - pausas aleatorias entre envíos,
+  - botón de apagado fácil.
 
-## Decisión técnica importante
+## Regla importante para que funcione el recordatorio
 
-WhatsApp **reply buttons** admiten hasta **3 opciones**, así que el MVP usa un **interactive list message**.
+Cada evento del calendario debe incluir un **teléfono** en el título o la descripción. Ejemplo:
+
+```txt
+Depilación - Ana Pérez
+Cliente: Ana Pérez
+Tel: 5492494123456
+```
+
+Sin teléfono, el turno se sincroniza igual, pero queda con estado `missing_phone` y no se puede enviar recordatorio.
 
 ## Stack
 
 - Frontend: React + Vite
 - Backend: Node.js + Express
-- Persistencia: JSON file local (MVP)
-- Deploy sugerido: Railway
-
-## Estructura
-
-- `frontend/`: panel admin simple
-- `backend/`: webhook, envío de mensajes, persistencia y API interna
+- Persistencia: JSON local
+- WhatsApp: Evolution API (Baileys / QR)
+- Calendario: Google Calendar API (OAuth web app)
 
 ## Variables de entorno
 
@@ -42,24 +44,19 @@ Copiá `.env.example` a `.env` y completá:
 cp .env.example .env
 ```
 
-### Requeridas
+### Requeridas para QR
 
-- `META_ACCESS_TOKEN`: token permanente o de larga duración de Meta
-- `META_PHONE_NUMBER_ID`: Phone Number ID del número Cloud API
-- `WEBHOOK_VERIFY_TOKEN`: token para verificar el webhook
-- `APP_BASE_URL`: URL pública del backend (por ejemplo Railway)
-- `OWNER_WHATSAPP_NUMBER`: número al que querés derivar, ya cargado con `5492494514175`
+- `EVOLUTION_API_URL`
+- `EVOLUTION_API_KEY`
+- `EVOLUTION_INSTANCE`
+- `APP_BASE_URL`
 
-### Configuración desde el panel
+### Requeridas para Google Calendar
 
-No necesitás nuevas variables para horarios o agenda online. Eso ahora se guarda en el JSON interno del backend desde el panel:
-
-- zona horaria,
-- días activos,
-- horarios por día,
-- modo de agenda,
-- link de agenda online,
-- texto del botón y mensaje automático.
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_REDIRECT_URI`
+- `GOOGLE_CALENDAR_ID` (`primary` sirve en la mayoría de los casos)
 
 ## Desarrollo local
 
@@ -71,95 +68,30 @@ npm run dev
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:8080`
 
-## Build
-
-```bash
-npm run build
-npm start
-```
-
-## Endpoints
-
-### Público para Meta
-
-- `GET /webhook` → verificación del webhook
-- `POST /webhook` → recepción de mensajes y statuses
-
-### Internos para el panel
+## Endpoints internos útiles
 
 - `GET /health`
 - `GET /api/config`
-- `GET /api/settings`
-- `PUT /api/settings`
 - `GET /api/interactions`
-- `GET /api/webhook-events`
+- `GET /api/contacts`
+- `GET /api/appointments`
+- `GET /api/evolution/status`
+- `POST /api/evolution/ensure-instance`
+- `GET /api/evolution/qr`
+- `GET /auth/google`
+- `GET /api/google/status`
+- `POST /api/google/sync`
+- `POST /api/reminders/run`
 
-## Cómo conectar con Meta
+## Flujo recomendado
 
-1. Crear app en Meta for Developers.
-2. Agregar producto **WhatsApp**.
-3. Obtener:
-   - `Phone Number ID`
-   - `Access Token`
-4. Configurar webhook:
-   - Callback URL: `https://TU-BACKEND/webhook`
-   - Verify token: el mismo valor de `WEBHOOK_VERIFY_TOKEN`
-5. Suscribirse al campo `messages`.
-6. Poner el número Cloud API en producción según tu cuenta WABA.
+1. Preparar la instancia de Evolution.
+2. Pedir el QR y escanearlo con el WhatsApp del negocio.
+3. Conectar Google Calendar desde el panel.
+4. Crear turnos en Google Calendar con nombre y teléfono.
+5. Sincronizar agenda o esperar al proceso automático.
+6. Procesar recordatorios o dejar que corran por intervalo.
 
-## Cómo usar la agenda online más simple
+## Nota de producción
 
-La integración más liviana para este MVP es:
-
-1. crear tu página de reservas en Google Calendar,
-2. copiar el link público,
-3. pegarlo en el panel,
-4. cambiar el modo a **“Usar link de agenda online”**.
-
-Desde ese momento, cuando la clienta toque **“Agendar turno”**, el bot manda un botón con ese enlace.
-
-## Flujo del MVP
-
-1. La clienta escribe “hola” o cualquier mensaje.
-2. El backend envía una lista interactiva.
-3. La clienta elige una opción.
-4. El backend responde con:
-   - link al WhatsApp de Emme, o
-   - link de agenda online, según configuración.
-5. Se guarda registro local.
-6. Cuando Meta envía estados del mensaje, también quedan guardados.
-
-## Notas reales de MVP
-
-- El archivo JSON sirve para validar el flujo. Para producción conviene migrar a Postgres.
-- No hay autenticación en el panel porque es MVP. Antes de producción, agregá login o al menos Basic Auth.
-- La agenda online por link evita OAuth y reduce mucho la complejidad.
-
-## Próximos pasos recomendados
-
-- Login básico para el panel
-- Postgres en Railway
-- Servicios/precios
-- Bloqueo de slots por duración real
-- Google Calendar OAuth solo si necesitás crear eventos desde tu backend
-
-## Deploy en Railway separado (recomendado)
-
-Este repo ya incluye ajustes para deployar **frontend** y **backend** como servicios distintos en Railway.
-
-### Backend
-
-- Root Directory: `backend`
-- Variable clave: `SERVE_FRONTEND=false`
-- Callback URL del webhook: `https://TU-BACKEND.up.railway.app/webhook`
-
-### Frontend
-
-- Root Directory: `frontend`
-- Variable clave: `VITE_API_BASE_URL=https://TU-BACKEND.up.railway.app`
-
-### Nota importante sobre el webhook de Meta
-
-Meta verifica el webhook con un `GET` al callback URL y espera `200` devolviendo exactamente el `hub.challenge` cuando el verify token coincide.
-
-Más detalle operativo en `RAILWAY_DEPLOY.md`.
+Este MVP usa JSON local. Para producción real, conviene migrar la persistencia a Postgres o SQLite.

@@ -1,62 +1,39 @@
 import { useEffect, useMemo, useState } from 'react';
 
+const DAY_LABELS = {
+  monday: 'Lunes',
+  tuesday: 'Martes',
+  wednesday: 'Miércoles',
+  thursday: 'Jueves',
+  friday: 'Viernes',
+  saturday: 'Sábado',
+  sunday: 'Domingo'
+};
+
 function resolveApiBase() {
   const configured = import.meta.env.VITE_API_BASE_URL?.trim();
-  if (configured) {
-    return configured.replace(/\/$/, '');
-  }
-
+  if (configured) return configured.replace(/\/$/, '');
   if (typeof window !== 'undefined') {
     const { hostname, origin } = window.location;
-
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'http://localhost:8080';
-    }
-
+    if (hostname === 'localhost' || hostname === '127.0.0.1') return 'http://localhost:8080';
     return origin;
   }
-
   return '';
 }
 
 const API_BASE = resolveApiBase();
-
-function buildApiUrl(path) {
-  return `${API_BASE}${path}`;
-}
-
-function clone(value) {
-  if (typeof structuredClone === 'function') {
-    return structuredClone(value);
-  }
-  return JSON.parse(JSON.stringify(value));
-}
+const buildApiUrl = (path) => `${API_BASE}${path}`;
 
 async function parseResponse(response) {
   const text = await response.text();
-  const contentType = response.headers.get('content-type') || '';
-
-  if (!contentType.includes('application/json')) {
-    throw new Error(`La API devolvió una respuesta no JSON: ${text.slice(0, 180)}`);
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(text.slice(0, 250) || `Error HTTP ${response.status}`);
   }
-
-  const data = text ? JSON.parse(text) : {};
-
-  if (!response.ok) {
-    const message = data?.error || data?.message || `Error HTTP ${response.status}`;
-    throw new Error(message);
-  }
-
+  if (!response.ok) throw new Error(data?.error || data?.message || `Error HTTP ${response.status}`);
   return data;
-}
-
-async function apiFetch(path, options = {}) {
-  return fetch(buildApiUrl(path), options).then(parseResponse);
-}
-
-function formatDate(value) {
-  if (!value) return '-';
-  return new Date(value).toLocaleString('es-AR');
 }
 
 function SectionCard({ title, subtitle, actions, children }) {
@@ -74,336 +51,294 @@ function SectionCard({ title, subtitle, actions, children }) {
   );
 }
 
-function InteractionRow({ item }) {
-  return (
-    <tr>
-      <td>{formatDate(item.created_at)}</td>
-      <td>{item.customer_name || 'Sin nombre'}</td>
-      <td>{item.customer_wa_id || '-'}</td>
-      <td>{item.direction}</td>
-      <td>{item.message_type}</td>
-      <td>{item.selected_option || '-'}</td>
-      <td>{item.status}</td>
-      <td className="preview-cell">{item.message_preview || '-'}</td>
-    </tr>
-  );
+function Badge({ tone = 'default', children }) {
+  return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
-function MessageBubble({ item }) {
-  const roleClass = item.direction === 'inbound' ? 'bubble-inbound' : item.direction === 'outbound_bot' ? 'bubble-bot' : 'bubble-status';
-  const title =
-    item.direction === 'inbound'
-      ? 'Cliente'
-      : item.direction === 'outbound_bot'
-      ? 'Bot'
-      : 'Estado Meta';
-
+function TimelineItem({ item }) {
   return (
-    <article className={`message-bubble ${roleClass}`}>
-      <div className="message-bubble-top">
-        <strong>{title}</strong>
-        <span>{formatDate(item.created_at)}</span>
+    <article className={`timeline-item ${item.direction || 'neutral'}`}>
+      <div className="timeline-head">
+        <strong>{item.customer_name || item.customer_wa_id || 'Sin nombre'}</strong>
+        <span>{new Date(item.created_at).toLocaleString('es-AR')}</span>
       </div>
-      <p>{item.message_body || item.message_preview || '-'}</p>
-      <div className="message-bubble-meta">
-        <span>{item.message_type}</span>
-        {item.selected_option ? <span>{item.selected_option}</span> : null}
-        {item.status ? <span>{item.status}</span> : null}
+      <div className="timeline-meta">
+        <Badge tone={item.direction === 'outbound' ? 'accent' : 'default'}>{item.direction}</Badge>
+        <Badge tone="muted">{item.message_type}</Badge>
+        <Badge tone="muted">{item.status}</Badge>
       </div>
-      {item.owner_link ? (
-        <a href={item.owner_link} target="_blank" rel="noreferrer">
-          Abrir link
-        </a>
-      ) : null}
+      <p>{item.message_preview || '-'}</p>
     </article>
   );
 }
 
-function SettingsEditor({ value, onChange, onSave, saving, saveMessage }) {
-  if (!value) {
-    return null;
-  }
+function ContactRow({ contact, onSelect }) {
+  return (
+    <button className="contact-row" onClick={() => onSelect(contact)}>
+      <div>
+        <strong>{contact.name || 'Sin nombre'}</strong>
+        <span>{contact.wa_id}</span>
+      </div>
+      <small>{contact.last_message_preview || 'Sin mensajes'}</small>
+    </button>
+  );
+}
 
-  function update(path, nextValue) {
-    const draft = clone(value);
-    let ref = draft;
+function AppointmentRow({ item }) {
+  return (
+    <tr>
+      <td>{new Date(item.start_at).toLocaleString('es-AR')}</td>
+      <td>{item.summary}</td>
+      <td>{item.contact_name || '-'}</td>
+      <td>{item.contact_phone || '-'}</td>
+      <td><Badge tone={item.reminder_status === 'sent' ? 'accent' : item.reminder_status === 'missing_phone' ? 'danger' : 'muted'}>{item.reminder_status}</Badge></td>
+      <td>{item.reminder_sent_at ? new Date(item.reminder_sent_at).toLocaleString('es-AR') : '-'}</td>
+    </tr>
+  );
+}
 
-    for (let index = 0; index < path.length - 1; index += 1) {
-      ref = ref[path[index]];
-    }
-
-    ref[path[path.length - 1]] = nextValue;
-    onChange(draft);
-  }
-
-  function updateDay(dayKey, patch) {
-    const draft = clone(value);
-    draft.schedule = draft.schedule.map((day) =>
-      day.key === dayKey ? { ...day, ...patch } : day
-    );
-    onChange(draft);
-  }
+function SettingsForm({ settings, onChange, onSave, saving }) {
+  if (!settings) return null;
 
   return (
-    <form
-      className="settings-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSave();
-      }}
-    >
-      <div className="settings-grid">
-        <div>
-          <label>Zona horaria</label>
-          <input
-            value={value.timezone}
-            onChange={(event) => update(['timezone'], event.target.value)}
-            placeholder="America/Argentina/Buenos_Aires"
-          />
-        </div>
-        <div>
-          <label>Modo de agenda</label>
-          <select
-            value={value.booking.mode}
-            onChange={(event) => update(['booking', 'mode'], event.target.value)}
-          >
-            <option value="owner_whatsapp">Derivar al WhatsApp de Emme</option>
-            <option value="booking_link">Usar link de agenda online</option>
+    <form className="settings-form" onSubmit={onSave}>
+      <div className="form-grid">
+        <label>
+          <span>Nombre del salón</span>
+          <input value={settings.salonName} onChange={(e) => onChange('salonName', e.target.value)} />
+        </label>
+        <label>
+          <span>Atiende</span>
+          <input value={settings.ownerDisplayName} onChange={(e) => onChange('ownerDisplayName', e.target.value)} />
+        </label>
+        <label>
+          <span>WhatsApp del negocio</span>
+          <input value={settings.ownerWhatsAppNumber} onChange={(e) => onChange('ownerWhatsAppNumber', e.target.value)} />
+        </label>
+        <label>
+          <span>Límite diario</span>
+          <input type="number" min="1" value={settings.dailyReminderLimit} onChange={(e) => onChange('dailyReminderLimit', Number(e.target.value))} />
+        </label>
+        <label>
+          <span>Pausa mínima (seg)</span>
+          <input type="number" min="0" value={settings.minDelaySeconds} onChange={(e) => onChange('minDelaySeconds', Number(e.target.value))} />
+        </label>
+        <label>
+          <span>Pausa máxima (seg)</span>
+          <input type="number" min="0" value={settings.maxDelaySeconds} onChange={(e) => onChange('maxDelaySeconds', Number(e.target.value))} />
+        </label>
+        <label>
+          <span>Horas antes del recordatorio</span>
+          <input type="number" min="1" max="72" value={settings.reminderHoursBefore} onChange={(e) => onChange('reminderHoursBefore', Number(e.target.value))} />
+        </label>
+        <label>
+          <span>Sincronizar cada (min)</span>
+          <input type="number" min="1" max="60" value={settings.syncEveryMinutes} onChange={(e) => onChange('syncEveryMinutes', Number(e.target.value))} />
+        </label>
+        <label>
+          <span>Modo de agenda</span>
+          <select value={settings.bookingMode} onChange={(e) => onChange('bookingMode', e.target.value)}>
+            <option value="owner_whatsapp">Derivar al WhatsApp</option>
+            <option value="booking_link">Mandar link externo</option>
           </select>
-        </div>
-        <div>
-          <label>Texto del botón</label>
-          <input
-            value={value.booking.bookingPageLabel}
-            onChange={(event) => update(['booking', 'bookingPageLabel'], event.target.value)}
-            placeholder="Reservar online"
-          />
-        </div>
-        <div>
-          <label>Mostrar horarios en respuestas</label>
-          <select
-            value={value.bot.includeScheduleInReplies ? 'yes' : 'no'}
-            onChange={(event) => update(['bot', 'includeScheduleInReplies'], event.target.value === 'yes')}
-          >
-            <option value="yes">Sí</option>
-            <option value="no">No</option>
-          </select>
-        </div>
-        <div className="field-span-2">
-          <label>Link de agenda online</label>
-          <input
-            value={value.booking.bookingPageUrl}
-            onChange={(event) => update(['booking', 'bookingPageUrl'], event.target.value)}
-            placeholder="https://calendar.google.com/..."
-          />
-        </div>
-        <div className="field-span-2">
-          <label>Mensaje cuando el cliente pide agendar</label>
-          <textarea
-            rows="3"
-            value={value.booking.bookingMessage}
-            onChange={(event) => update(['booking', 'bookingMessage'], event.target.value)}
-            placeholder="Si te queda cómodo, también podés reservar online desde este enlace."
-          />
-        </div>
-        <div className="field-span-2">
-          <label>Notas internas</label>
-          <textarea
-            rows="2"
-            value={value.booking.notes}
-            onChange={(event) => update(['booking', 'notes'], event.target.value)}
-            placeholder="Ejemplo: link de Google Calendar appointment schedule"
-          />
-        </div>
+        </label>
+        <label>
+          <span>Link de agenda</span>
+          <input value={settings.bookingLink || ''} onChange={(e) => onChange('bookingLink', e.target.value)} placeholder="https://calendar.google.com/..." />
+        </label>
       </div>
 
-      <div className="schedule-editor">
-        <div className="schedule-editor-header">
-          <h3>Días y horarios</h3>
-          <p>Esto alimenta el panel y la respuesta automática cuando preguntan por horarios.</p>
-        </div>
-        <div className="days-grid">
-          {value.schedule.map((day) => (
-            <div key={day.key} className="day-card">
-              <div className="day-card-top">
-                <strong>{day.label}</strong>
-                <label className="toggle-inline">
-                  <input
-                    type="checkbox"
-                    checked={day.enabled}
-                    onChange={(event) => updateDay(day.key, { enabled: event.target.checked })}
-                  />
-                  Activo
-                </label>
-              </div>
-              <div className="day-times">
-                <div>
-                  <label>Desde</label>
-                  <input
-                    type="time"
-                    value={day.start}
-                    disabled={!day.enabled}
-                    onChange={(event) => updateDay(day.key, { start: event.target.value })}
-                  />
-                </div>
-                <div>
-                  <label>Hasta</label>
-                  <input
-                    type="time"
-                    value={day.end}
-                    disabled={!day.enabled}
-                    onChange={(event) => updateDay(day.key, { end: event.target.value })}
-                  />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+      <div className="toggle-grid">
+        <label><input type="checkbox" checked={settings.botEnabled} onChange={(e) => onChange('botEnabled', e.target.checked)} /> Bot encendido</label>
+        <label><input type="checkbox" checked={settings.reminderOnlyMode} onChange={(e) => onChange('reminderOnlyMode', e.target.checked)} /> Solo recordatorios</label>
+        <label><input type="checkbox" checked={settings.onlyExistingContacts} onChange={(e) => onChange('onlyExistingContacts', e.target.checked)} /> Solo contactos existentes</label>
+        <label><input type="checkbox" checked={settings.allowAutoReply} onChange={(e) => onChange('allowAutoReply', e.target.checked)} /> Permitir auto respuesta simple</label>
       </div>
 
-      <div className="settings-footer">
-        <button className="primary-button" type="submit" disabled={saving}>
-          {saving ? 'Guardando...' : 'Guardar configuración'}
-        </button>
-        {saveMessage ? <span className="save-message">{saveMessage}</span> : null}
+      <label className="full-width">
+        <span>Plantilla de recordatorio</span>
+        <textarea rows="4" value={settings.reminderTemplate} onChange={(e) => onChange('reminderTemplate', e.target.value)} />
+      </label>
+
+      <div className="hours-grid">
+        {Object.entries(settings.businessHours || {}).map(([key, value]) => (
+          <div key={key} className="hours-card">
+            <label><input type="checkbox" checked={Boolean(value.enabled)} onChange={(e) => onChange(`businessHours.${key}.enabled`, e.target.checked)} /> {DAY_LABELS[key]}</label>
+            {(value.ranges || [{ from: '', to: '' }]).map((range, index) => (
+              <div key={index} className="hours-range">
+                <input type="time" value={range.from} onChange={(e) => onChange(`businessHours.${key}.ranges.${index}.from`, e.target.value)} />
+                <input type="time" value={range.to} onChange={(e) => onChange(`businessHours.${key}.ranges.${index}.to`, e.target.value)} />
+              </div>
+            ))}
+          </div>
+        ))}
       </div>
+
+      <button className="primary-button" disabled={saving}>{saving ? 'Guardando...' : 'Guardar configuración'}</button>
     </form>
   );
 }
 
+function updateNested(obj, path, value) {
+  const parts = path.split('.');
+  const clone = structuredClone(obj);
+  let current = clone;
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const part = /^\d+$/.test(parts[i]) ? Number(parts[i]) : parts[i];
+    current = current[part];
+  }
+  const last = /^\d+$/.test(parts[parts.length - 1]) ? Number(parts[parts.length - 1]) : parts[parts.length - 1];
+  current[last] = value;
+  return clone;
+}
+
 export default function App() {
   const [config, setConfig] = useState(null);
+  const [settings, setSettings] = useState(null);
   const [interactions, setInteractions] = useState([]);
-  const [webhookEvents, setWebhookEvents] = useState([]);
-  const [settingsDraft, setSettingsDraft] = useState(null);
-  const [selectedConversation, setSelectedConversation] = useState('');
+  const [contacts, setContacts] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [evolutionStatus, setEvolutionStatus] = useState(null);
+  const [googleStatus, setGoogleStatus] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [savingSettings, setSavingSettings] = useState(false);
   const [error, setError] = useState('');
-  const [saveMessage, setSaveMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [actionMessage, setActionMessage] = useState('');
+  const [selectedContact, setSelectedContact] = useState(null);
+  const [reminderWhen, setReminderWhen] = useState('mañana');
+  const [customText, setCustomText] = useState('');
+
+  async function loadAll() {
+    const [configJson, settingsJson, interactionsJson, contactsJson, eventsJson, statusJson, googleJson, appointmentsJson] = await Promise.all([
+      fetch(buildApiUrl('/api/config')).then(parseResponse),
+      fetch(buildApiUrl('/api/settings')).then(parseResponse),
+      fetch(buildApiUrl('/api/interactions')).then(parseResponse),
+      fetch(buildApiUrl('/api/contacts')).then(parseResponse),
+      fetch(buildApiUrl('/api/webhook-events')).then(parseResponse),
+      fetch(buildApiUrl('/api/evolution/status')).then(parseResponse),
+      fetch(buildApiUrl('/api/google/status')).then(parseResponse),
+      fetch(buildApiUrl('/api/appointments')).then(parseResponse)
+    ]);
+
+    setConfig(configJson);
+    setSettings(settingsJson);
+    setInteractions(interactionsJson.items || []);
+    setContacts(contactsJson.items || []);
+    setEvents(eventsJson.items || []);
+    setEvolutionStatus(statusJson);
+    setGoogleStatus(googleJson);
+    setAppointments(appointmentsJson.items || []);
+  }
 
   useEffect(() => {
     let active = true;
-
-    async function load() {
+    (async () => {
       try {
         setLoading(true);
-
-        const [configJson, interactionsJson, eventsJson] = await Promise.all([
-          apiFetch('/api/config'),
-          apiFetch('/api/interactions?limit=500'),
-          apiFetch('/api/webhook-events?limit=120')
-        ]);
-
+        await loadAll();
         if (!active) return;
-        setConfig(configJson);
-        setInteractions(interactionsJson.items || []);
-        setWebhookEvents(eventsJson.items || []);
-        setSettingsDraft((current) => current || clone(configJson.settings));
         setError('');
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          if (params.get('google') === 'connected') {
+            setActionMessage('Google Calendar conectado.');
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        }
       } catch (err) {
-        if (!active) return;
-        setError(err.message || 'Error desconocido');
+        if (active) setError(err.message || 'No se pudo cargar el panel');
       } finally {
         if (active) setLoading(false);
       }
-    }
-
-    load();
-    const timer = setInterval(load, 10000);
+    })();
+    const timer = setInterval(() => active && loadAll().catch(() => {}), 15000);
     return () => {
       active = false;
       clearInterval(timer);
     };
   }, []);
 
-  const totals = useMemo(() => {
-    const inbound = interactions.filter((item) => item.direction === 'inbound').length;
-    const statuses = interactions.filter((item) => item.direction === 'outbound_status').length;
-    const botMessages = interactions.filter((item) => item.direction === 'outbound_bot').length;
-    return { inbound, statuses, botMessages };
-  }, [interactions]);
+  const totals = useMemo(() => ({
+    inbound: interactions.filter((item) => item.direction === 'inbound').length,
+    outbound: interactions.filter((item) => item.direction === 'outbound').length,
+    contacts: contacts.length,
+    upcoming: appointments.filter((item) => new Date(item.start_at).getTime() > Date.now()).length
+  }), [appointments, contacts.length, interactions]);
 
-  const conversations = useMemo(() => {
-    const grouped = new Map();
-
-    [...interactions]
-      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-      .forEach((item) => {
-        const key = item.customer_wa_id || 'sin-numero';
-        if (!grouped.has(key)) {
-          grouped.set(key, {
-            key,
-            customerName: item.customer_name || 'Sin nombre',
-            customerWaId: item.customer_wa_id || '-',
-            items: []
-          });
-        }
-
-        const group = grouped.get(key);
-        if (!group.customerName && item.customer_name) {
-          group.customerName = item.customer_name;
-        }
-        group.items.push(item);
-      });
-
-    return Array.from(grouped.values())
-      .map((group) => ({
-        ...group,
-        lastItem: group.items[group.items.length - 1]
-      }))
-      .sort((a, b) => new Date(b.lastItem?.created_at || 0) - new Date(a.lastItem?.created_at || 0));
-  }, [interactions]);
-
-  useEffect(() => {
-    if (!conversations.length) {
-      setSelectedConversation('');
-      return;
-    }
-
-    const exists = conversations.some((conversation) => conversation.key === selectedConversation);
-    if (!selectedConversation || !exists) {
-      setSelectedConversation(conversations[0].key);
-    }
-  }, [conversations, selectedConversation]);
-
-  const selectedChat = conversations.find((conversation) => conversation.key === selectedConversation) || null;
-  const botMessages = interactions.filter((item) => item.direction === 'outbound_bot').slice(0, 12);
-
-  async function saveSettings() {
-    if (!settingsDraft) return;
-
+  async function saveSettings(event) {
+    event.preventDefault();
     try {
-      setSavingSettings(true);
-      const result = await apiFetch('/api/settings', {
+      setSaving(true);
+      const json = await fetch(buildApiUrl('/api/settings'), {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(settingsDraft)
-      });
-
-      setConfig((current) =>
-        current
-          ? {
-              ...current,
-              settings: result.settings,
-              scheduleSummary: result.scheduleSummary,
-              bookingEnabled:
-                result.settings.booking.mode === 'booking_link' && Boolean(result.settings.booking.bookingPageUrl),
-              bookingMode: result.settings.booking.mode,
-              bookingPageUrl: result.settings.booking.bookingPageUrl
-            }
-          : current
-      );
-      setSettingsDraft(clone(result.settings));
-      setSaveMessage('Configuración guardada.');
-      setError('');
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      }).then(parseResponse);
+      setSettings(json.settings);
+      setActionMessage('Configuración guardada.');
     } catch (err) {
-      setError(err.message || 'No se pudo guardar la configuración.');
+      setError(err.message || 'No se pudo guardar');
     } finally {
-      setSavingSettings(false);
-      window.setTimeout(() => setSaveMessage(''), 2500);
+      setSaving(false);
+    }
+  }
+
+  async function postAndReload(path, successMessage) {
+    try {
+      const json = await fetch(buildApiUrl(path), { method: 'POST' }).then(parseResponse);
+      setActionMessage(successMessage || 'Acción ejecutada.');
+      await loadAll();
+      return json;
+    } catch (err) {
+      setError(err.message || 'No se pudo ejecutar la acción');
+      throw err;
+    }
+  }
+
+  async function prepareInstance() {
+    const json = await postAndReload('/api/evolution/ensure-instance', 'Instancia preparada.');
+    setActionMessage(`Instancia preparada. Webhook: ${json.webhookUrl || 'revisar APP_BASE_URL'}`);
+  }
+
+  async function loadQr() {
+    await postAndReload('/api/evolution/qr', 'QR actualizado.');
+  }
+
+  async function runSync() {
+    const json = await postAndReload('/api/google/sync', 'Agenda sincronizada.');
+    setActionMessage(`Agenda sincronizada. Eventos actualizados: ${json.count}`);
+  }
+
+  async function runReminders() {
+    const json = await postAndReload('/api/reminders/run', 'Cola de recordatorios procesada.');
+    setActionMessage(`Recordatorios enviados: ${json.processed}. Saltados: ${json.skipped}.`);
+  }
+
+  async function disconnectGoogle() {
+    await postAndReload('/api/google/disconnect', 'Google Calendar desconectado.');
+  }
+
+  async function sendManualReminder(event) {
+    event.preventDefault();
+    if (!selectedContact) return;
+    try {
+      const json = await fetch(buildApiUrl('/api/reminders/send'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          waId: selectedContact.wa_id,
+          name: selectedContact.name,
+          when: reminderWhen,
+          text: customText
+        })
+      }).then(parseResponse);
+
+      setActionMessage(`Recordatorio enviado con delay de ${Math.round((json.delayMs || 0) / 1000)} segundos.`);
+      setCustomText('');
+      await loadAll();
+    } catch (err) {
+      setError(err.message || 'No se pudo enviar el recordatorio');
     }
   }
 
@@ -411,224 +346,135 @@ export default function App() {
     <main className="page">
       <header className="hero">
         <div>
-          <span className="eyebrow">MVP · WhatsApp Cloud API</span>
+          <span className="eyebrow">Evolution QR + Google Calendar</span>
           <h1>{config?.salonName || 'Emme Estetica'}</h1>
           <p>
-            Panel operativo con conversaciones, mensajes salientes del bot y configuración de horarios.
-            También deja listo un modo simple de agenda online por link.
+            Panel para conectar QR, sincronizar Google Calendar y mandar recordatorios
+            solo a clientas existentes con pausas y límites diarios.
           </p>
-          {!import.meta.env.VITE_API_BASE_URL && typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? (
-            <p className="info">
-              Producción detectada sin <code>VITE_API_BASE_URL</code>. Si el frontend y el backend están en Railway por separado,
-              cargá esa variable con la URL pública del backend.
-            </p>
-          ) : null}
         </div>
-        <div className="hero-actions">
-          <a className="primary-link" href={config?.ownerLink || '#'} target="_blank" rel="noreferrer">
-            Abrir WhatsApp de Emme
-          </a>
-          {config?.bookingPageUrl ? (
-            <a className="secondary-link" href={config.bookingPageUrl} target="_blank" rel="noreferrer">
-              Abrir agenda online
-            </a>
-          ) : null}
-        </div>
+        <a className="primary-link" href={config?.ownerLink || '#'} target="_blank" rel="noreferrer">
+          Abrir WhatsApp
+        </a>
       </header>
 
       <section className="stats-grid">
-        <article className="stat-card">
-          <span>Interacciones entrantes</span>
-          <strong>{totals.inbound}</strong>
-        </article>
-        <article className="stat-card">
-          <span>Mensajes del bot</span>
-          <strong>{totals.botMessages}</strong>
-        </article>
-        <article className="stat-card">
-          <span>Estados recibidos</span>
-          <strong>{totals.statuses}</strong>
-        </article>
+        <article className="stat-card"><span>Entrantes</span><strong>{totals.inbound}</strong></article>
+        <article className="stat-card"><span>Salientes</span><strong>{totals.outbound}</strong></article>
+        <article className="stat-card"><span>Contactos</span><strong>{totals.contacts}</strong></article>
+        <article className="stat-card"><span>Próximos turnos</span><strong>{totals.upcoming}</strong></article>
       </section>
 
       {loading ? <p className="info">Cargando panel...</p> : null}
+      {actionMessage ? <p className="info">{actionMessage}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
-      <SectionCard title="Configuración activa" subtitle="Ruta de agenda, días abiertos y resumen operativo">
-        <div className="config-grid">
-          <div>
-            <label>Salón</label>
-            <div>{config?.salonName || '-'}</div>
+      <SectionCard
+        title="Conexiones"
+        subtitle="Estado del QR y del calendario"
+        actions={
+          <div className="inline-actions">
+            <button className="secondary-button" onClick={prepareInstance}>Preparar instancia</button>
+            <button className="secondary-button" onClick={loadQr}>Obtener QR</button>
           </div>
-          <div>
-            <label>Atiende</label>
-            <div>{config?.ownerDisplayName || '-'}</div>
+        }
+      >
+        <div className="two-col-grid">
+          <div className="status-box">
+            <h3>Evolution QR</h3>
+            <p><strong>Instancia:</strong> {evolutionStatus?.instanceName || '-'}</p>
+            <p><strong>Estado:</strong> {evolutionStatus?.connection?.status || '-'}</p>
+            <p><strong>Webhook:</strong> {evolutionStatus?.webhookUrl || '-'}</p>
+            {evolutionStatus?.connection?.qrCode ? <p className="small-note">QR disponible en backend. Pedilo desde el endpoint /api/evolution/qr si necesitás inspección cruda.</p> : null}
           </div>
-          <div>
-            <label>WhatsApp destino</label>
-            <div>{config?.ownerWhatsAppNumber || '-'}</div>
-          </div>
-          <div>
-            <label>API base</label>
-            <div>{API_BASE || '(misma URL del frontend)'}</div>
-          </div>
-          <div className="field-span-2">
-            <label>Resumen de horarios</label>
-            <div>{config?.scheduleSummary || 'Todavía no configurado.'}</div>
-          </div>
-          <div>
-            <label>Modo de agenda</label>
-            <div>{config?.bookingMode === 'booking_link' ? 'Agenda online por link' : 'Derivación por WhatsApp'}</div>
-          </div>
-          <div>
-            <label>Link online</label>
-            <div>
-              {config?.bookingPageUrl ? (
-                <a href={config.bookingPageUrl} target="_blank" rel="noreferrer">
-                  {config.bookingPageUrl}
-                </a>
-              ) : (
-                'No configurado'
-              )}
+          <div className="status-box">
+            <h3>Google Calendar</h3>
+            <p><strong>Conectado:</strong> {googleStatus?.state?.connected ? 'Sí' : 'No'}</p>
+            <p><strong>Calendario:</strong> {googleStatus?.state?.calendarId || '-'}</p>
+            <p><strong>Última sync:</strong> {googleStatus?.state?.lastSyncAt ? new Date(googleStatus.state.lastSyncAt).toLocaleString('es-AR') : '-'}</p>
+            <div className="inline-actions">
+              <a className="secondary-button link-button" href={buildApiUrl('/auth/google')}>Conectar Google</a>
+              <button className="secondary-button" onClick={runSync}>Sincronizar agenda</button>
+              <button className="secondary-button" onClick={disconnectGoogle}>Desconectar</button>
             </div>
           </div>
         </div>
       </SectionCard>
 
       <SectionCard
-        title="Agenda y horarios"
-        subtitle="Podés dejar el flujo manual por WhatsApp o pasar a una agenda online por link."
-      >
-        <div className="recommendation-box">
-          <strong>Recomendación para este MVP</strong>
-          <p>
-            Si querés lo más simple, usá un link de agenda online. El bot le manda ese botón al cliente cuando toca “Agendar turno”.
-          </p>
-        </div>
-        <SettingsEditor
-          value={settingsDraft}
-          onChange={setSettingsDraft}
-          onSave={saveSettings}
-          saving={savingSettings}
-          saveMessage={saveMessage}
-        />
-      </SectionCard>
-
-      <SectionCard
-        title="Conversaciones"
-        subtitle="Acá ves lo que entra del cliente y exactamente lo que responde el bot."
-      >
-        <div className="conversation-layout">
-          <aside className="conversation-sidebar">
-            {conversations.length ? (
-              conversations.map((conversation) => (
-                <button
-                  key={conversation.key}
-                  className={`conversation-item ${selectedConversation === conversation.key ? 'active' : ''}`}
-                  onClick={() => setSelectedConversation(conversation.key)}
-                >
-                  <strong>{conversation.customerName || 'Sin nombre'}</strong>
-                  <span>{conversation.customerWaId}</span>
-                  <p>{conversation.lastItem?.message_preview || 'Sin actividad'}</p>
-                </button>
-              ))
-            ) : (
-              <p className="info compact">Todavía no hay conversaciones registradas.</p>
-            )}
-          </aside>
-          <div className="conversation-thread">
-            {selectedChat ? (
-              <>
-                <div className="conversation-thread-header">
-                  <div>
-                    <strong>{selectedChat.customerName}</strong>
-                    <span>{selectedChat.customerWaId}</span>
-                  </div>
-                  <span>{selectedChat.items.length} eventos</span>
-                </div>
-                <div className="bubble-list">
-                  {selectedChat.items.map((item) => (
-                    <MessageBubble key={item.id} item={item} />
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p className="info compact">Elegí una conversación para ver el detalle.</p>
-            )}
-          </div>
-        </div>
-      </SectionCard>
-
-      <SectionCard
-        title="Últimos mensajes del bot"
-        subtitle="Atajo rápido para auditar respuestas automáticas sin abrir cada conversación."
-      >
-        <div className="bot-message-list">
-          {botMessages.length ? (
-            botMessages.map((item) => (
-              <div key={item.id} className="bot-message-item">
-                <div>
-                  <strong>{item.customer_name || item.customer_wa_id || 'Sin destinatario'}</strong>
-                  <span>{formatDate(item.created_at)}</span>
-                </div>
-                <p>{item.message_body || item.message_preview || '-'}</p>
-              </div>
-            ))
-          ) : (
-            <p className="info compact">Todavía no hay mensajes del bot guardados.</p>
-          )}
-        </div>
-      </SectionCard>
-
-      <SectionCard
-        title="Últimas interacciones"
-        subtitle="Tabla completa para debug rápido de eventos de entrada, salida y estados de Meta."
+        title="Turnos del calendario"
+        subtitle="Se leen desde Google Calendar. Para enviar recordatorio automático, agregá un teléfono en el título o la descripción del evento."
+        actions={<button className="secondary-button" onClick={runReminders}>Procesar recordatorios ahora</button>}
       >
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Fecha</th>
-                <th>Nombre</th>
+                <th>Turno</th>
+                <th>Cliente</th>
                 <th>WhatsApp</th>
-                <th>Dirección</th>
-                <th>Tipo</th>
-                <th>Opción</th>
-                <th>Estado</th>
-                <th>Detalle</th>
+                <th>Recordatorio</th>
+                <th>Enviado</th>
               </tr>
             </thead>
             <tbody>
-              {interactions.length ? (
-                interactions.map((item) => <InteractionRow key={item.id} item={item} />)
-              ) : (
-                <tr>
-                  <td colSpan="8">Todavía no hay interacciones registradas.</td>
-                </tr>
+              {appointments.length ? appointments.map((item) => <AppointmentRow key={item.id} item={item} />) : (
+                <tr><td colSpan="6">Todavía no hay turnos sincronizados.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </SectionCard>
 
-      <SectionCard
-        title="Últimos webhooks"
-        subtitle="Debug rápido de eventos crudos recibidos desde Meta."
-      >
+      <SectionCard title="Recordatorio manual" subtitle="Usa solo contactos que ya escribieron." >
+        <div className="contacts-layout">
+          <div className="contacts-list">
+            {contacts.length ? contacts.map((contact) => (
+              <ContactRow key={contact.id} contact={contact} onSelect={setSelectedContact} />
+            )) : <p className="info">Todavía no hay contactos.</p>}
+          </div>
+          <form className="reminder-panel" onSubmit={sendManualReminder}>
+            <h3>{selectedContact ? `Enviar a ${selectedContact.name || selectedContact.wa_id}` : 'Elegí un contacto'}</h3>
+            <label>
+              <span>Cuándo</span>
+              <input value={reminderWhen} onChange={(e) => setReminderWhen(e.target.value)} placeholder="mañana a las 15:00" />
+            </label>
+            <label>
+              <span>Texto personalizado</span>
+              <textarea rows="5" value={customText} onChange={(e) => setCustomText(e.target.value)} placeholder="Opcional. Si lo dejás vacío, usa la plantilla del sistema." />
+            </label>
+            <button className="primary-button" disabled={!selectedContact}>Enviar recordatorio</button>
+          </form>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Configuración" subtitle="Horarios, reglas y plantilla de recordatorio">
+        <SettingsForm
+          settings={settings}
+          onChange={(path, value) => setSettings((current) => updateNested(current, path, value))}
+          onSave={saveSettings}
+          saving={saving}
+        />
+      </SectionCard>
+
+      <SectionCard title="Últimos mensajes" subtitle="Entrantes, salientes y estados del bot">
+        <div className="timeline-grid">
+          {interactions.length ? interactions.slice(0, 24).map((item) => <TimelineItem key={item.id} item={item} />) : <p className="info">Todavía no hay actividad.</p>}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Eventos crudos" subtitle="Debug de webhooks y sincronizaciones">
         <div className="events-list">
-          {webhookEvents.length ? (
-            webhookEvents.map((event) => (
-              <details key={event.id} className="event-item">
-                <summary>
-                  <span>{formatDate(event.created_at)}</span>
-                  <strong>{event.event_type}</strong>
-                </summary>
-                <pre>{event.payload}</pre>
-              </details>
-            ))
-          ) : (
-            <p className="info compact">Todavía no llegaron eventos.</p>
-          )}
+          {events.length ? events.map((event) => (
+            <details key={event.id} className="event-item">
+              <summary>
+                <span>{new Date(event.created_at).toLocaleString('es-AR')}</span>
+                <strong>{event.event_type}</strong>
+              </summary>
+              <pre>{event.payload}</pre>
+            </details>
+          )) : <p className="info">Todavía no llegaron eventos.</p>}
         </div>
       </SectionCard>
     </main>
