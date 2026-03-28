@@ -48,102 +48,29 @@ const HOST = process.env.HOST || '0.0.0.0';
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '*';
 const APP_BASE_URL = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
 const EVOLUTION_WEBHOOK_PATH = '/webhook/evolution';
-const GOOGLE_AUTH_START_PATH = '/auth/google';
-const GOOGLE_AUTH_CALLBACK_PATH = '/auth/google/callback';
 
 const allowedOrigins =
   FRONTEND_ORIGIN === '*'
     ? '*'
-    : FRONTEND_ORIGIN.split(',').map((value) => value.trim()).filter(Boolean);
+    : FRONTEND_ORIGIN.split(',').map((v) => v.trim()).filter(Boolean);
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (allowedOrigins === '*') return callback(null, true);
-      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error(`CORS blocked for origin: ${origin}`));
-    }
-  })
-);
-
-app.use(
-  express.json({
-    limit: '2mb',
-    verify(req, _res, buffer) {
-      req.rawBody = buffer.toString('utf8');
-    }
-  })
-);
+app.use(cors({
+  origin(origin, cb) {
+    if (allowedOrigins === '*') return cb(null, true);
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error('CORS not allowed'));
+  }
+}));
+app.use(express.json({ limit: '2mb' }));
 
 if (frontendAvailable) {
   app.use(express.static(frontendDist));
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 const DAY_NAMES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-const MONTH_NAMES = [
-  'enero',
-  'febrero',
-  'marzo',
-  'abril',
-  'mayo',
-  'junio',
-  'julio',
-  'agosto',
-  'septiembre',
-  'octubre',
-  'noviembre',
-  'diciembre'
-];
-
-function buildApiConfig() {
-  const settings = getSettings();
-  return {
-    salonName: settings.salonName,
-    ownerDisplayName: settings.ownerDisplayName,
-    ownerWhatsAppNumber: settings.ownerWhatsAppNumber,
-    bookingMode: settings.bookingMode,
-    bookingLink: settings.bookingLink,
-    ownerLink: settings.ownerWhatsAppNumber
-      ? `https://wa.me/${String(settings.ownerWhatsAppNumber).replace(/\D/g, '')}`
-      : '',
-    instanceName: getInstanceName(),
-    webhookUrl: APP_BASE_URL ? `${APP_BASE_URL}${EVOLUTION_WEBHOOK_PATH}` : '',
-    googleRedirectUri: getGoogleRedirectUri(),
-    evolutionConfigured: Boolean(process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY),
-    googleConfigured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
-  };
-}
-
-function formatBusinessHours(hours) {
-  const labels = {
-    monday: 'Lunes',
-    tuesday: 'Martes',
-    wednesday: 'Miércoles',
-    thursday: 'Jueves',
-    friday: 'Viernes',
-    saturday: 'Sábado',
-    sunday: 'Domingo'
-  };
-
-  return Object.entries(hours)
-    .map(([key, value]) => {
-      if (!value?.enabled) return `${labels[key]}: cerrado`;
-      const ranges = (value.ranges || []).map((range) => `${range.from} a ${range.to}`).join(' / ');
-      return `${labels[key]}: ${ranges || 'cerrado'}`;
-    })
-    .join('\n');
-}
-
-function buildWelcomeMessage() {
-  const settings = getSettings();
-  const intro = `Hola, soy el asistente de ${settings.salonName}.`;
-  const hours = formatBusinessHours(settings.businessHours);
-  const booking = settings.bookingMode === 'booking_link' && settings.bookingLink
-    ? `Podés reservar directo acá: ${settings.bookingLink}`
-    : 'Si querés agendar o mover un turno, respondé a este mensaje y Emme te contesta manualmente.';
-
-  return `${intro}\n\nHorarios:\n${hours}\n\n${booking}`;
-}
+const MONTH_NAMES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
 function randomDelayMs(settings) {
   const min = Number(settings.minDelaySeconds || 0) * 1000;
@@ -156,10 +83,16 @@ function normalizePhone(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
+function formatReminderWhen(startAt) {
+  const date = new Date(startAt);
+  return `${DAY_NAMES[date.getDay()]} ${date.getDate()} de ${MONTH_NAMES[date.getMonth()]} a las ${date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+}
+
 function parseContactFromEvent(event) {
   const summary = String(event.summary || '').trim();
   const description = String(event.description || '').trim();
   const sourceText = `${summary}\n${description}`;
+
   const phoneMatch = sourceText.match(/(?:\+?54\s?9?|\+)?\d[\d\s().-]{7,}\d/g);
   const contactPhone = phoneMatch ? normalizePhone(phoneMatch[0]) : '';
 
@@ -168,56 +101,39 @@ function parseContactFromEvent(event) {
   if (explicitName?.[1]) {
     contactName = explicitName[1].split('\n')[0].trim();
   } else if (summary) {
-    const pieces = summary.split('-').map((item) => item.trim()).filter(Boolean);
+    const pieces = summary.split('-').map((s) => s.trim()).filter(Boolean);
     contactName = pieces.length > 1 ? pieces[pieces.length - 1] : pieces[0] || '';
   }
 
-  return {
-    contactName,
-    contactPhone,
-    notes: description || null
-  };
+  return { contactName, contactPhone, notes: description || null };
 }
 
 function getEventDates(event) {
   const allDay = Boolean(event.start?.date && !event.start?.dateTime);
   const startAt = event.start?.dateTime || `${event.start?.date}T09:00:00`;
   const endAt = event.end?.dateTime || `${event.end?.date}T10:00:00`;
-  return {
-    allDay,
-    startAt,
-    endAt,
-    timezone: event.start?.timeZone || event.end?.timeZone || null
-  };
+  return { allDay, startAt, endAt, timezone: event.start?.timeZone || event.end?.timeZone || null };
 }
+
+// ─── Google Calendar ──────────────────────────────────────────────────────────
 
 async function getValidGoogleAccessToken() {
   const google = getGoogleState();
-  if (!google.refreshToken) {
-    throw new Error('Google Calendar no está conectado todavía.');
-  }
+  if (!google.refreshToken) throw new Error('Google Calendar no está conectado.');
 
   const expired = !google.expiryDate || new Date(google.expiryDate).getTime() <= Date.now() + 30_000;
   if (!google.accessToken || expired) {
     const refreshed = await refreshGoogleAccessToken(google.refreshToken);
     const normalized = normalizeGoogleTokens(refreshed, google.refreshToken);
-    updateGoogleState({
-      ...normalized,
-      connected: true,
-      connectedAt: google.connectedAt || new Date().toISOString(),
-      lastError: null
-    });
+    updateGoogleState({ ...normalized, connected: true, connectedAt: google.connectedAt || new Date().toISOString(), lastError: null });
     return normalized.accessToken;
   }
-
   return google.accessToken;
 }
 
 async function syncGoogleCalendar({ reason = 'manual' } = {}) {
   const google = getGoogleState();
-  if (!google.refreshToken) {
-    throw new Error('Google Calendar no está conectado.');
-  }
+  if (!google.refreshToken) throw new Error('Google Calendar no está conectado.');
 
   const accessToken = await getValidGoogleAccessToken();
   const now = new Date();
@@ -253,31 +169,26 @@ async function syncGoogleCalendar({ reason = 'manual' } = {}) {
     const { allDay, startAt, endAt, timezone } = getEventDates(event);
     const contact = parseContactFromEvent(event);
     const current = findAppointmentByEventId(event.id);
-    const reminderSentAt = current?.reminder_sent_at || null;
     const reminderStatus = event.status === 'cancelled' ? 'cancelled' : current?.reminder_status || 'pending';
-    const syncStatus = contact.contactPhone ? 'synced' : 'missing_phone';
 
     const row = upsertAppointment({
       googleEventId: event.id,
       summary: event.summary || '(Sin título)',
       description: event.description || '',
       status: event.status || 'confirmed',
-      startAt,
-      endAt,
-      timezone,
-      allDay,
+      startAt, endAt, timezone, allDay,
       contactName: contact.contactName,
       contactPhone: contact.contactPhone,
       notes: contact.notes,
       htmlLink: event.htmlLink || null,
       rawEvent: event,
-      syncStatus,
-      syncError: contact.contactPhone ? null : 'No se encontró teléfono en título o descripción.'
+      syncStatus: contact.contactPhone ? 'synced' : 'missing_phone',
+      syncError: contact.contactPhone ? null : 'Sin teléfono en título o descripción.'
     });
 
-    if (current && (current.reminder_sent_at || current.reminder_status)) {
+    if (current?.reminder_sent_at || current?.reminder_status) {
       markAppointmentReminder(row.id, {
-        reminder_sent_at: reminderSentAt,
+        reminder_sent_at: current.reminder_sent_at || null,
         reminder_status: reminderStatus
       });
     } else if (!contact.contactPhone) {
@@ -298,107 +209,89 @@ async function syncGoogleCalendar({ reason = 'manual' } = {}) {
   return synced;
 }
 
-function formatReminderWhen(startAt) {
-  const date = new Date(startAt);
-  return `${DAY_NAMES[date.getDay()]} ${date.getDate()} de ${MONTH_NAMES[date.getMonth()]} a las ${date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
-}
+// ─── Reminders ────────────────────────────────────────────────────────────────
 
 async function processDueReminders({ reason = 'manual' } = {}) {
   const settings = getSettings();
-  if (!settings.botEnabled) {
-    return { processed: 0, skipped: 0, reason: 'bot_disabled' };
-  }
+  if (!settings.botEnabled) return { processed: 0, skipped: 0, reason: 'bot_disabled' };
 
   const appointments = listAppointments(500);
   const now = Date.now();
-  let processed = 0;
-  let skipped = 0;
   const dueMs = Number(settings.reminderHoursBefore || 24) * 60 * 60 * 1000;
   const today = new Date().toISOString().slice(0, 10);
   let sentToday = countOutboundRemindersForDate(today);
+  let processed = 0;
+  let skipped = 0;
 
-  for (const appointment of appointments) {
-    if (appointment.status === 'cancelled') {
-      markAppointmentReminder(appointment.id, { reminder_status: 'cancelled' });
-      skipped += 1;
+  for (const appt of appointments) {
+    if (appt.status === 'cancelled') {
+      markAppointmentReminder(appt.id, { reminder_status: 'cancelled' });
+      skipped++;
+      continue;
+    }
+    if (appt.reminder_sent_at) { skipped++; continue; }
+    if (!appt.contact_phone) {
+      markAppointmentReminder(appt.id, { reminder_status: 'missing_phone' });
+      skipped++;
+      continue;
+    }
+    if (settings.onlyExistingContacts && !findContactByWaId(appt.contact_phone)) {
+      markAppointmentReminder(appt.id, { reminder_status: 'not_existing_contact' });
+      skipped++;
       continue;
     }
 
-    if (appointment.reminder_sent_at) {
-      skipped += 1;
-      continue;
-    }
-
-    if (!appointment.contact_phone) {
-      markAppointmentReminder(appointment.id, { reminder_status: 'missing_phone' });
-      skipped += 1;
-      continue;
-    }
-
-    if (settings.onlyExistingContacts && !findContactByWaId(appointment.contact_phone)) {
-      markAppointmentReminder(appointment.id, { reminder_status: 'not_existing_contact' });
-      skipped += 1;
-      continue;
-    }
-
-    const startTime = new Date(appointment.start_at).getTime();
+    const startTime = new Date(appt.start_at).getTime();
     if (Number.isNaN(startTime)) {
-      markAppointmentReminder(appointment.id, { reminder_status: 'invalid_date' });
-      skipped += 1;
+      markAppointmentReminder(appt.id, { reminder_status: 'invalid_date' });
+      skipped++;
       continue;
     }
 
     const targetTime = startTime - dueMs;
-    if (now < targetTime || now > startTime) {
-      skipped += 1;
-      continue;
-    }
+    if (now < targetTime || now > startTime) { skipped++; continue; }
 
     if (sentToday >= Number(settings.dailyReminderLimit || 0)) {
-      markAppointmentReminder(appointment.id, { reminder_status: 'daily_limit_reached' });
-      skipped += 1;
+      markAppointmentReminder(appt.id, { reminder_status: 'daily_limit_reached' });
+      skipped++;
       continue;
     }
 
     const text = settings.reminderTemplate
-      .replaceAll('{name}', appointment.contact_name || 'hola')
+      .replaceAll('{name}', appt.contact_name || 'hola')
       .replaceAll('{salon}', settings.salonName)
-      .replaceAll('{when}', formatReminderWhen(appointment.start_at));
+      .replaceAll('{when}', formatReminderWhen(appt.start_at));
 
     const delayMs = randomDelayMs(settings);
-    const response = await sendTextMessage({
-      number: appointment.contact_phone,
-      text,
-      delayMs
-    });
+    const response = await sendTextMessage({ number: appt.contact_phone, text, delayMs });
 
     insertInteraction({
-      customerWaId: appointment.contact_phone,
-      customerName: appointment.contact_name,
+      customerWaId: appt.contact_phone,
+      customerName: appt.contact_name,
       messageType: 'reminder',
       messagePreview: text,
       wamid: response?.key?.id || null,
       direction: 'outbound',
       status: response?.status || 'PENDING',
-      appointmentId: appointment.id,
+      appointmentId: appt.id,
       rawPayload: response
     });
 
     upsertContact({
-      waId: appointment.contact_phone,
-      name: appointment.contact_name,
+      waId: appt.contact_phone,
+      name: appt.contact_name,
       lastMessageAt: new Date().toISOString(),
       lastMessagePreview: text,
       lastDirection: 'outbound'
     });
 
-    markAppointmentReminder(appointment.id, {
+    markAppointmentReminder(appt.id, {
       reminder_sent_at: new Date().toISOString(),
       reminder_status: 'sent'
     });
 
-    sentToday += 1;
-    processed += 1;
+    sentToday++;
+    processed++;
   }
 
   insertWebhookEvent('reminder_run', { reason, processed, skipped });
@@ -412,228 +305,140 @@ async function syncAndProcess(reason) {
     await syncGoogleCalendar({ reason });
     await processDueReminders({ reason });
   } catch (error) {
-    console.error('Sync/process error:', error);
-    insertWebhookEvent('google_sync_error', { reason, message: error.message });
+    console.error('Sync/process error:', error.message);
+    insertWebhookEvent('sync_error', { reason, message: error.message });
   }
 }
 
-app.get('/', (_req, res) => {
-  if (frontendAvailable) return res.sendFile(frontendIndex);
-  return res.json({ ok: true, app: 'emme-estetica-backend', status: 'running', mode: 'evolution-qr-google-calendar' });
-});
+// ─── Routes ───────────────────────────────────────────────────────────────────
 
-app.get('/health', (_req, res) => {
+app.get('/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
+
+app.get('/api/config', (_req, res) => {
+  const s = getSettings();
   res.json({
-    ok: true,
-    app: 'emme-estetica-backend',
-    frontendServed: frontendAvailable,
-    evolutionConfigured: Boolean(process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY),
-    googleConfigured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-    instanceName: getInstanceName(),
-    googleConnected: Boolean(getGoogleState().refreshToken),
-    uptimeSeconds: Math.round(process.uptime())
+    salonName: s.salonName,
+    ownerWhatsAppNumber: s.ownerWhatsAppNumber,
+    ownerLink: s.ownerWhatsAppNumber ? `https://wa.me/${normalizePhone(s.ownerWhatsAppNumber)}` : ''
   });
 });
 
-app.get('/api/config', (_req, res) => {
-  res.json(buildApiConfig());
-});
-
-app.get('/api/settings', (_req, res) => {
-  res.json(getSettings());
-});
-
+app.get('/api/settings', (_req, res) => res.json(getSettings()));
 app.put('/api/settings', (req, res) => {
-  const next = updateSettings(req.body || {});
-  res.json({ ok: true, settings: next });
+  const updated = updateSettings(req.body);
+  res.json({ ok: true, settings: updated });
 });
 
-app.get('/api/interactions', (_req, res) => {
-  res.json({ items: listInteractions(300) });
-});
+app.get('/api/interactions', (_req, res) => res.json({ items: listInteractions(200) }));
+app.get('/api/webhook-events', (_req, res) => res.json({ items: listWebhookEvents(100) }));
+app.get('/api/contacts', (_req, res) => res.json({ items: listContacts(200) }));
+app.get('/api/appointments', (_req, res) => res.json({ items: listAppointments(200) }));
 
-app.get('/api/webhook-events', (_req, res) => {
-  res.json({ items: listWebhookEvents(150) });
-});
-
-app.get('/api/contacts', (_req, res) => {
-  res.json({ items: listContacts(300) });
-});
-
-app.get('/api/appointments', (_req, res) => {
-  res.json({ items: listAppointments(300) });
-});
-
+// Evolution
 app.get('/api/evolution/status', (_req, res) => {
+  const conn = getConnection();
   res.json({
-    ok: true,
-    configured: Boolean(process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY),
     instanceName: getInstanceName(),
-    webhookUrl: APP_BASE_URL ? `${APP_BASE_URL}${EVOLUTION_WEBHOOK_PATH}` : '',
-    connection: getConnection()
+    connection: conn,
+    webhookUrl: APP_BASE_URL ? `${APP_BASE_URL}${EVOLUTION_WEBHOOK_PATH}` : null
   });
 });
 
 app.post('/api/evolution/ensure-instance', async (_req, res, next) => {
   try {
     const webhookUrl = APP_BASE_URL ? `${APP_BASE_URL}${EVOLUTION_WEBHOOK_PATH}` : '';
-    const data = await ensureInstance(webhookUrl);
-    insertWebhookEvent('evolution_instance_prepare', data);
-    res.json({ ok: true, data, webhookUrl });
-  } catch (error) {
-    next(error);
-  }
+    const result = await ensureInstance(webhookUrl);
+    res.json({ ok: true, webhookUrl, result });
+  } catch (error) { next(error); }
 });
 
 app.get('/api/evolution/qr', async (_req, res, next) => {
   try {
     const data = await fetchQrCode();
-    updateConnection({
-      qrCode: data.code || data.base64 || null,
-      pairingCode: data.pairingCode || null,
-      status: 'awaiting_qr_scan',
-      lastError: null
-    });
-    res.json({ ok: true, ...data, connection: getConnection() });
-  } catch (error) {
-    updateConnection({ lastError: error.message });
-    next(error);
-  }
+    const qrCode = data?.base64 || data?.qrcode?.base64 || null;
+    if (qrCode) updateConnection({ qrCode, status: 'awaiting_qr_scan', lastError: null });
+    const conn = getConnection();
+    res.json({ ok: true, qrCode: conn.qrCode || qrCode, status: conn.status });
+  } catch (error) { next(error); }
 });
 
+// Google
 app.get('/api/google/status', (_req, res) => {
-  const google = getGoogleState();
-  res.json({
-    ok: true,
-    configured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-    authUrl: `${APP_BASE_URL || ''}${GOOGLE_AUTH_START_PATH}`,
-    callbackUrl: getGoogleRedirectUri(),
-    state: google
-  });
+  const state = getGoogleState();
+  res.json({ state: { ...state, accessToken: undefined, refreshToken: undefined } });
 });
 
-app.get(GOOGLE_AUTH_START_PATH, (req, res, next) => {
-  try {
-    const authUrl = getGoogleAuthUrl(String(req.query.state || 'panel'));
-    res.redirect(authUrl);
-  } catch (error) {
-    next(error);
-  }
+app.get('/auth/google', (req, res, next) => {
+  try { res.redirect(getGoogleAuthUrl(req.query.state || '')); }
+  catch (error) { next(error); }
 });
 
-app.get(GOOGLE_AUTH_CALLBACK_PATH, async (req, res, next) => {
+app.get('/auth/google/callback', async (req, res, next) => {
   try {
-    const code = String(req.query.code || '');
-    if (!code) {
-      throw new Error('Google no devolvió código de autorización.');
-    }
-
-    const tokenResponse = await exchangeCodeForTokens(code);
+    const { code, error: oauthError } = req.query;
+    if (oauthError) return res.redirect(`/?google=error&reason=${encodeURIComponent(oauthError)}`);
+    if (!code) return res.redirect('/?google=error&reason=no_code');
+    const tokenResponse = await exchangeCodeForTokens(String(code));
     const normalized = normalizeGoogleTokens(tokenResponse);
     updateGoogleState({
       ...normalized,
       connected: true,
       connectedAt: new Date().toISOString(),
       calendarId: getGoogleCalendarId(),
+      lastSyncStatus: 'never',
       lastError: null,
-      lastSyncStatus: 'connected'
+      syncToken: ''
     });
-
-    await syncGoogleCalendar({ reason: 'oauth_callback' });
-
-    const target = allowedOrigins === '*' ? '' : allowedOrigins[0] || '';
-    if (target) {
-      return res.redirect(`${target}?google=connected`);
-    }
-
-    return res.send('Google Calendar conectado. Ya podés volver al panel.');
-  } catch (error) {
-    next(error);
-  }
+    setTimeout(() => syncGoogleCalendar({ reason: 'oauth_connect' }).catch(console.error), 1000);
+    return res.redirect('/?google=connected');
+  } catch (error) { next(error); }
 });
 
 app.post('/api/google/sync', async (_req, res, next) => {
   try {
-    const items = await syncGoogleCalendar({ reason: 'manual' });
-    res.json({ ok: true, count: items.length, items });
-  } catch (error) {
-    next(error);
-  }
+    const synced = await syncGoogleCalendar({ reason: 'manual' });
+    res.json({ ok: true, count: synced.length });
+  } catch (error) { next(error); }
 });
 
 app.post('/api/google/disconnect', (_req, res) => {
-  const state = disconnectGoogle();
-  res.json({ ok: true, state });
+  disconnectGoogle();
+  res.json({ ok: true });
 });
 
+// Reminders
 app.post('/api/reminders/run', async (_req, res, next) => {
   try {
     const result = await processDueReminders({ reason: 'manual' });
     res.json({ ok: true, ...result });
-  } catch (error) {
-    next(error);
-  }
+  } catch (error) { next(error); }
 });
 
 app.post('/api/reminders/send', async (req, res, next) => {
   try {
+    const { waId, name, when, text: customText } = req.body;
+    if (!waId) return res.status(400).json({ error: 'waId requerido' });
     const settings = getSettings();
-    if (!settings.botEnabled) {
-      return res.status(400).json({ ok: false, error: 'El bot está apagado. Encendelo para enviar recordatorios.' });
-    }
-
-    const waId = normalizePhone(req.body?.waId || '');
-    const name = String(req.body?.name || '').trim();
-    const when = String(req.body?.when || '').trim();
-    const customText = String(req.body?.text || '').trim();
-
-    if (!waId) {
-      return res.status(400).json({ ok: false, error: 'Falta el WhatsApp del contacto.' });
-    }
-
-    const contact = findContactByWaId(waId);
-    if (settings.onlyExistingContacts && !contact) {
-      return res.status(400).json({ ok: false, error: 'Solo se permiten recordatorios a contactos que ya escribieron antes.' });
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    const sentToday = countOutboundRemindersForDate(today);
-    if (sentToday >= Number(settings.dailyReminderLimit || 0)) {
-      return res.status(400).json({ ok: false, error: 'Se alcanzó el límite diario de recordatorios.' });
-    }
-
-    const text = customText || settings.reminderTemplate
-      .replaceAll('{name}', name || contact?.name || 'hola')
-      .replaceAll('{salon}', settings.salonName)
-      .replaceAll('{when}', when || 'tu próximo turno');
-
+    const text = customText?.trim() ||
+      settings.reminderTemplate
+        .replaceAll('{name}', name || 'hola')
+        .replaceAll('{salon}', settings.salonName)
+        .replaceAll('{when}', when || 'tu turno');
     const delayMs = randomDelayMs(settings);
     const response = await sendTextMessage({ number: waId, text, delayMs });
-
+    upsertContact({ waId, name, lastMessageAt: new Date().toISOString(), lastMessagePreview: text, lastDirection: 'outbound' });
     insertInteraction({
-      customerWaId: waId,
-      customerName: name || contact?.name || null,
-      messageType: 'reminder',
-      messagePreview: text,
+      customerWaId: waId, customerName: name,
+      messageType: 'manual_reminder', messagePreview: text,
       wamid: response?.key?.id || null,
-      direction: 'outbound',
-      status: response?.status || 'PENDING',
+      direction: 'outbound', status: response?.status || 'PENDING',
       rawPayload: response
     });
-
-    upsertContact({
-      waId,
-      name: name || contact?.name || null,
-      lastMessageAt: new Date().toISOString(),
-      lastMessagePreview: text,
-      lastDirection: 'outbound'
-    });
-
-    res.json({ ok: true, delayMs, response });
-  } catch (error) {
-    next(error);
-  }
+    res.json({ ok: true, delayMs });
+  } catch (error) { next(error); }
 });
+
+// ─── Evolution Webhook ────────────────────────────────────────────────────────
 
 app.post(EVOLUTION_WEBHOOK_PATH, async (req, res) => {
   const eventName = String(req.body?.event || req.headers['x-evolution-event'] || 'unknown').toLowerCase();
@@ -643,111 +448,74 @@ app.post(EVOLUTION_WEBHOOK_PATH, async (req, res) => {
     const payload = req.body?.data || req.body;
 
     if (eventName.includes('qrcode')) {
-      updateConnection({
-        status: 'awaiting_qr_scan',
-        qrCode: payload?.qrcode?.base64 || payload?.base64 || payload?.code || null,
-        pairingCode: payload?.pairingCode || null,
-        lastError: null
-      });
+      const qrCode = payload?.qrcode?.base64 || payload?.base64 || payload?.code || null;
+      updateConnection({ status: 'awaiting_qr_scan', qrCode, pairingCode: payload?.pairingCode || null, lastError: null });
     }
 
     if (eventName.includes('connection')) {
+      const status = payload?.state || payload?.status || 'unknown';
       updateConnection({
-        status: payload?.state || payload?.status || 'unknown',
-        qrCode: null,
-        pairingCode: null,
+        status,
+        qrCode: status === 'open' ? null : undefined,
         lastError: null
       });
     }
 
     if (eventName.includes('messages_upsert') || eventName.includes('messages-upsert')) {
       const message = payload?.messages?.[0] || payload?.message || payload;
-      const remoteJid = message?.key?.remoteJid || message?.key?.participant || message?.remoteJid || '';
+      const remoteJid = message?.key?.remoteJid || message?.remoteJid || '';
       const fromMe = Boolean(message?.key?.fromMe || payload?.fromMe);
       const waId = String(remoteJid).split('@')[0].replace(/\D/g, '');
       const text =
         message?.message?.conversation ||
         message?.message?.extendedTextMessage?.text ||
         message?.message?.imageMessage?.caption ||
-        message?.pushName ||
         '[mensaje sin texto]';
       const customerName = message?.pushName || payload?.pushName || null;
 
       if (waId) {
         upsertContact({
-          waId,
-          remoteJid,
-          name: customerName,
+          waId, remoteJid, name: customerName,
           lastMessageAt: new Date().toISOString(),
           lastMessagePreview: text,
           lastDirection: fromMe ? 'outbound' : 'inbound'
         });
-      }
-
-      insertInteraction({
-        customerWaId: waId,
-        customerName,
-        messageType: fromMe ? 'sent_text' : 'received_text',
-        messagePreview: text,
-        wamid: message?.key?.id || null,
-        direction: fromMe ? 'outbound' : 'inbound',
-        status: fromMe ? 'PENDING' : 'received',
-        rawPayload: req.body
-      });
-
-      const settings = getSettings();
-      const normalizedText = String(text || '').trim().toLowerCase();
-      const isGreeting = ['hola', 'buenas', 'horario', 'horarios', 'turno', 'turnos', 'info'].includes(normalizedText);
-
-      if (!fromMe && settings.botEnabled && settings.allowAutoReply && isGreeting && !settings.reminderOnlyMode && waId) {
-        const reply = buildWelcomeMessage();
-        const response = await sendTextMessage({ number: waId, text: reply, delayMs: randomDelayMs(settings) });
         insertInteraction({
-          customerWaId: waId,
-          customerName,
-          messageType: 'auto_reply',
-          messagePreview: reply,
-          wamid: response?.key?.id || null,
-          direction: 'outbound',
-          status: response?.status || 'PENDING',
-          rawPayload: response
+          customerWaId: waId, customerName,
+          messageType: fromMe ? 'sent' : 'received',
+          messagePreview: text,
+          wamid: message?.key?.id || null,
+          direction: fromMe ? 'outbound' : 'inbound',
+          status: fromMe ? 'PENDING' : 'received',
+          rawPayload: req.body
         });
       }
     }
 
     return res.sendStatus(200);
   } catch (error) {
-    console.error('Evolution webhook processing error:', error);
-    insertWebhookEvent('evolution_webhook_error', {
-      message: error.message,
-      stack: error.stack,
-      rawBody: req.rawBody || null
-    });
+    console.error('Webhook error:', error.message);
     return res.sendStatus(200);
   }
 });
 
-app.use((error, _req, res, next) => {
-  if (!error) return next();
-  console.error('Request error:', error);
-  return res.status(500).json({ ok: false, error: error.message || 'Unexpected server error' });
+app.use((error, _req, res, _next) => {
+  console.error('Error:', error.message);
+  res.status(500).json({ ok: false, error: error.message || 'Error inesperado' });
 });
 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api') || req.path.startsWith('/webhook') || req.path.startsWith('/auth') || req.path === '/health') {
     return next();
   }
-
   if (frontendAvailable) return res.sendFile(frontendIndex);
-  return res.status(404).json({ ok: false, error: 'Route not found', path: req.path });
+  return res.status(404).json({ ok: false, error: 'Ruta no encontrada' });
 });
 
+// ─── Start ────────────────────────────────────────────────────────────────────
+
 app.listen(PORT, HOST, () => {
-  console.log(`Backend listening on http://${HOST}:${PORT}`);
-  setTimeout(() => {
-    syncAndProcess('startup');
-  }, 2_000);
-  setInterval(() => {
-    syncAndProcess('interval');
-  }, Math.max(1, Number(getSettings().syncEveryMinutes || 10)) * 60 * 1000);
+  console.log(`Servidor en http://${HOST}:${PORT}`);
+  setTimeout(() => syncAndProcess('startup'), 2_000);
+  setInterval(() => syncAndProcess('interval'), Math.max(1, Number(getSettings().syncEveryMinutes || 10)) * 60 * 1000);
 });

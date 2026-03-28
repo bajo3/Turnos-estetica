@@ -1,15 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 
-const DAY_LABELS = {
-  monday: 'Lunes',
-  tuesday: 'Martes',
-  wednesday: 'Miércoles',
-  thursday: 'Jueves',
-  friday: 'Viernes',
-  saturday: 'Sábado',
-  sunday: 'Domingo'
-};
-
 function resolveApiBase() {
   const configured = import.meta.env.VITE_API_BASE_URL?.trim();
   if (configured) return configured.replace(/\/$/, '');
@@ -22,213 +12,109 @@ function resolveApiBase() {
 }
 
 const API_BASE = resolveApiBase();
-const buildApiUrl = (path) => `${API_BASE}${path}`;
+const api = (path) => `${API_BASE}${path}`;
 
-async function parseResponse(response) {
-  const text = await response.text();
+async function fetchJson(url, opts = {}) {
+  const res = await fetch(url, opts);
+  const text = await res.text();
   let data = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(text.slice(0, 250) || `Error HTTP ${response.status}`);
-  }
-  if (!response.ok) throw new Error(data?.error || data?.message || `Error HTTP ${response.status}`);
+  try { data = text ? JSON.parse(text) : {}; } catch { throw new Error(text.slice(0, 200) || `Error ${res.status}`); }
+  if (!res.ok) throw new Error(data?.error || data?.message || `Error ${res.status}`);
   return data;
 }
 
-function SectionCard({ title, subtitle, actions, children }) {
+function Card({ title, subtitle, actions, children }) {
   return (
-    <section className="card">
-      <div className="card-header">
+    <section style={{ background: '#fff', borderRadius: 12, padding: 24, marginBottom: 24, boxShadow: '0 1px 4px rgba(0,0,0,.08)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
         <div>
-          <h2>{title}</h2>
-          {subtitle ? <p>{subtitle}</p> : null}
+          <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>{title}</h2>
+          {subtitle && <p style={{ margin: '4px 0 0', fontSize: 13, color: '#666' }}>{subtitle}</p>}
         </div>
-        {actions ? <div className="card-actions">{actions}</div> : null}
+        {actions && <div style={{ display: 'flex', gap: 8 }}>{actions}</div>}
       </div>
       {children}
     </section>
   );
 }
 
-function Badge({ tone = 'default', children }) {
-  return <span className={`badge badge-${tone}`}>{children}</span>;
-}
-
-function TimelineItem({ item }) {
+function Btn({ onClick, children, primary, disabled }) {
   return (
-    <article className={`timeline-item ${item.direction || 'neutral'}`}>
-      <div className="timeline-head">
-        <strong>{item.customer_name || item.customer_wa_id || 'Sin nombre'}</strong>
-        <span>{new Date(item.created_at).toLocaleString('es-AR')}</span>
-      </div>
-      <div className="timeline-meta">
-        <Badge tone={item.direction === 'outbound' ? 'accent' : 'default'}>{item.direction}</Badge>
-        <Badge tone="muted">{item.message_type}</Badge>
-        <Badge tone="muted">{item.status}</Badge>
-      </div>
-      <p>{item.message_preview || '-'}</p>
-    </article>
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        padding: '8px 16px', borderRadius: 8, border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+        background: primary ? '#7c3aed' : '#f3f4f6', color: primary ? '#fff' : '#333',
+        fontWeight: 500, fontSize: 13, opacity: disabled ? .6 : 1
+      }}
+    >{children}</button>
   );
 }
 
-function ContactRow({ contact, onSelect }) {
-  return (
-    <button className="contact-row" onClick={() => onSelect(contact)}>
-      <div>
-        <strong>{contact.name || 'Sin nombre'}</strong>
-        <span>{contact.wa_id}</span>
-      </div>
-      <small>{contact.last_message_preview || 'Sin mensajes'}</small>
-    </button>
-  );
+function StatusDot({ ok }) {
+  return <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: ok ? '#22c55e' : '#ef4444', marginRight: 6 }} />;
 }
 
-function AppointmentRow({ item }) {
-  return (
-    <tr>
-      <td>{new Date(item.start_at).toLocaleString('es-AR')}</td>
-      <td>{item.summary}</td>
-      <td>{item.contact_name || '-'}</td>
-      <td>{item.contact_phone || '-'}</td>
-      <td><Badge tone={item.reminder_status === 'sent' ? 'accent' : item.reminder_status === 'missing_phone' ? 'danger' : 'muted'}>{item.reminder_status}</Badge></td>
-      <td>{item.reminder_sent_at ? new Date(item.reminder_sent_at).toLocaleString('es-AR') : '-'}</td>
-    </tr>
-  );
+function Badge({ color, children }) {
+  const colors = { green: '#dcfce7', red: '#fee2e2', yellow: '#fef9c3', gray: '#f3f4f6' };
+  const texts = { green: '#166534', red: '#991b1b', yellow: '#854d0e', gray: '#555' };
+  const c = colors[color] || colors.gray;
+  const t = texts[color] || texts.gray;
+  return <span style={{ padding: '2px 8px', borderRadius: 12, background: c, color: t, fontSize: 12, fontWeight: 500 }}>{children}</span>;
 }
 
-function SettingsForm({ settings, onChange, onSave, saving }) {
-  if (!settings) return null;
-
-  return (
-    <form className="settings-form" onSubmit={onSave}>
-      <div className="form-grid">
-        <label>
-          <span>Nombre del salón</span>
-          <input value={settings.salonName} onChange={(e) => onChange('salonName', e.target.value)} />
-        </label>
-        <label>
-          <span>Atiende</span>
-          <input value={settings.ownerDisplayName} onChange={(e) => onChange('ownerDisplayName', e.target.value)} />
-        </label>
-        <label>
-          <span>WhatsApp del negocio</span>
-          <input value={settings.ownerWhatsAppNumber} onChange={(e) => onChange('ownerWhatsAppNumber', e.target.value)} />
-        </label>
-        <label>
-          <span>Límite diario</span>
-          <input type="number" min="1" value={settings.dailyReminderLimit} onChange={(e) => onChange('dailyReminderLimit', Number(e.target.value))} />
-        </label>
-        <label>
-          <span>Pausa mínima (seg)</span>
-          <input type="number" min="0" value={settings.minDelaySeconds} onChange={(e) => onChange('minDelaySeconds', Number(e.target.value))} />
-        </label>
-        <label>
-          <span>Pausa máxima (seg)</span>
-          <input type="number" min="0" value={settings.maxDelaySeconds} onChange={(e) => onChange('maxDelaySeconds', Number(e.target.value))} />
-        </label>
-        <label>
-          <span>Horas antes del recordatorio</span>
-          <input type="number" min="1" max="72" value={settings.reminderHoursBefore} onChange={(e) => onChange('reminderHoursBefore', Number(e.target.value))} />
-        </label>
-        <label>
-          <span>Sincronizar cada (min)</span>
-          <input type="number" min="1" max="60" value={settings.syncEveryMinutes} onChange={(e) => onChange('syncEveryMinutes', Number(e.target.value))} />
-        </label>
-        <label>
-          <span>Modo de agenda</span>
-          <select value={settings.bookingMode} onChange={(e) => onChange('bookingMode', e.target.value)}>
-            <option value="owner_whatsapp">Derivar al WhatsApp</option>
-            <option value="booking_link">Mandar link externo</option>
-          </select>
-        </label>
-        <label>
-          <span>Link de agenda</span>
-          <input value={settings.bookingLink || ''} onChange={(e) => onChange('bookingLink', e.target.value)} placeholder="https://calendar.google.com/..." />
-        </label>
-      </div>
-
-      <div className="toggle-grid">
-        <label><input type="checkbox" checked={settings.botEnabled} onChange={(e) => onChange('botEnabled', e.target.checked)} /> Bot encendido</label>
-        <label><input type="checkbox" checked={settings.reminderOnlyMode} onChange={(e) => onChange('reminderOnlyMode', e.target.checked)} /> Solo recordatorios</label>
-        <label><input type="checkbox" checked={settings.onlyExistingContacts} onChange={(e) => onChange('onlyExistingContacts', e.target.checked)} /> Solo contactos existentes</label>
-        <label><input type="checkbox" checked={settings.allowAutoReply} onChange={(e) => onChange('allowAutoReply', e.target.checked)} /> Permitir auto respuesta simple</label>
-      </div>
-
-      <label className="full-width">
-        <span>Plantilla de recordatorio</span>
-        <textarea rows="4" value={settings.reminderTemplate} onChange={(e) => onChange('reminderTemplate', e.target.value)} />
-      </label>
-
-      <div className="hours-grid">
-        {Object.entries(settings.businessHours || {}).map(([key, value]) => (
-          <div key={key} className="hours-card">
-            <label><input type="checkbox" checked={Boolean(value.enabled)} onChange={(e) => onChange(`businessHours.${key}.enabled`, e.target.checked)} /> {DAY_LABELS[key]}</label>
-            {(value.ranges || [{ from: '', to: '' }]).map((range, index) => (
-              <div key={index} className="hours-range">
-                <input type="time" value={range.from} onChange={(e) => onChange(`businessHours.${key}.ranges.${index}.from`, e.target.value)} />
-                <input type="time" value={range.to} onChange={(e) => onChange(`businessHours.${key}.ranges.${index}.to`, e.target.value)} />
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-
-      <button className="primary-button" disabled={saving}>{saving ? 'Guardando...' : 'Guardar configuración'}</button>
-    </form>
-  );
-}
-
-function updateNested(obj, path, value) {
-  const parts = path.split('.');
-  const clone = structuredClone(obj);
-  let current = clone;
-  for (let i = 0; i < parts.length - 1; i += 1) {
-    const part = /^\d+$/.test(parts[i]) ? Number(parts[i]) : parts[i];
-    current = current[part];
-  }
-  const last = /^\d+$/.test(parts[parts.length - 1]) ? Number(parts[parts.length - 1]) : parts[parts.length - 1];
-  current[last] = value;
-  return clone;
+function reminderBadge(status) {
+  if (status === 'sent') return <Badge color="green">enviado</Badge>;
+  if (status === 'missing_phone') return <Badge color="yellow">sin teléfono</Badge>;
+  if (status === 'cancelled') return <Badge color="gray">cancelado</Badge>;
+  if (status === 'daily_limit_reached') return <Badge color="red">límite diario</Badge>;
+  if (status === 'not_existing_contact') return <Badge color="yellow">no es contacto</Badge>;
+  return <Badge color="gray">{status || 'pendiente'}</Badge>;
 }
 
 export default function App() {
-  const [config, setConfig] = useState(null);
   const [settings, setSettings] = useState(null);
   const [interactions, setInteractions] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [appointments, setAppointments] = useState([]);
-  const [events, setEvents] = useState([]);
   const [evolutionStatus, setEvolutionStatus] = useState(null);
   const [googleStatus, setGoogleStatus] = useState(null);
+  const [qrCode, setQrCode] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [actionMessage, setActionMessage] = useState('');
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
   const [selectedContact, setSelectedContact] = useState(null);
   const [reminderWhen, setReminderWhen] = useState('mañana');
   const [customText, setCustomText] = useState('');
 
-  async function loadAll() {
-    const [configJson, settingsJson, interactionsJson, contactsJson, eventsJson, statusJson, googleJson, appointmentsJson] = await Promise.all([
-      fetch(buildApiUrl('/api/config')).then(parseResponse),
-      fetch(buildApiUrl('/api/settings')).then(parseResponse),
-      fetch(buildApiUrl('/api/interactions')).then(parseResponse),
-      fetch(buildApiUrl('/api/contacts')).then(parseResponse),
-      fetch(buildApiUrl('/api/webhook-events')).then(parseResponse),
-      fetch(buildApiUrl('/api/evolution/status')).then(parseResponse),
-      fetch(buildApiUrl('/api/google/status')).then(parseResponse),
-      fetch(buildApiUrl('/api/appointments')).then(parseResponse)
-    ]);
+  function flash(message, isErr = false) {
+    if (isErr) setErr(message); else setMsg(message);
+    setTimeout(() => isErr ? setErr('') : setMsg(''), 5000);
+  }
 
-    setConfig(configJson);
+  async function loadAll() {
+    const [settingsJson, interactionsJson, contactsJson, appointmentsJson, statusJson, googleJson] = await Promise.all([
+      fetchJson(api('/api/settings')),
+      fetchJson(api('/api/interactions')),
+      fetchJson(api('/api/contacts')),
+      fetchJson(api('/api/appointments')),
+      fetchJson(api('/api/evolution/status')),
+      fetchJson(api('/api/google/status'))
+    ]);
     setSettings(settingsJson);
     setInteractions(interactionsJson.items || []);
     setContacts(contactsJson.items || []);
-    setEvents(eventsJson.items || []);
+    setAppointments(appointmentsJson.items || []);
     setEvolutionStatus(statusJson);
     setGoogleStatus(googleJson);
-    setAppointments(appointmentsJson.items || []);
+    // Mostrar QR si está esperando escaneo
+    if (statusJson?.connection?.status === 'awaiting_qr_scan' && statusJson?.connection?.qrCode) {
+      setQrCode(statusJson.connection.qrCode);
+    } else if (statusJson?.connection?.status === 'open') {
+      setQrCode(null);
+    }
   }
 
   useEffect(() => {
@@ -238,245 +124,338 @@ export default function App() {
         setLoading(true);
         await loadAll();
         if (!active) return;
-        setError('');
-        if (typeof window !== 'undefined') {
-          const params = new URLSearchParams(window.location.search);
-          if (params.get('google') === 'connected') {
-            setActionMessage('Google Calendar conectado.');
-            window.history.replaceState({}, '', window.location.pathname);
-          }
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('google') === 'connected') {
+          flash('Google Calendar conectado correctamente.');
+          window.history.replaceState({}, '', window.location.pathname);
         }
-      } catch (err) {
-        if (active) setError(err.message || 'No se pudo cargar el panel');
+      } catch (e) {
+        if (active) flash(e.message || 'No se pudo cargar el panel.', true);
       } finally {
         if (active) setLoading(false);
       }
     })();
-    const timer = setInterval(() => active && loadAll().catch(() => {}), 15000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
+    const timer = setInterval(() => active && loadAll().catch(() => {}), 20000);
+    return () => { active = false; clearInterval(timer); };
   }, []);
 
-  const totals = useMemo(() => ({
-    inbound: interactions.filter((item) => item.direction === 'inbound').length,
-    outbound: interactions.filter((item) => item.direction === 'outbound').length,
-    contacts: contacts.length,
-    upcoming: appointments.filter((item) => new Date(item.start_at).getTime() > Date.now()).length
-  }), [appointments, contacts.length, interactions]);
+  const stats = useMemo(() => ({
+    pending: appointments.filter(a => a.reminder_status === 'pending' && new Date(a.start_at) > new Date()).length,
+    sent: appointments.filter(a => a.reminder_status === 'sent').length,
+    upcoming: appointments.filter(a => new Date(a.start_at) > new Date()).length,
+    missingPhone: appointments.filter(a => a.reminder_status === 'missing_phone').length,
+  }), [appointments]);
 
-  async function saveSettings(event) {
-    event.preventDefault();
+  const whatsappConnected = evolutionStatus?.connection?.status === 'open';
+  const googleConnected = googleStatus?.state?.connected;
+
+  async function handlePrepare() {
+    try {
+      const r = await fetchJson(api('/api/evolution/ensure-instance'), { method: 'POST' });
+      flash(`Instancia lista. Webhook: ${r.webhookUrl || '(configurá APP_BASE_URL)'}`);
+      await loadAll();
+    } catch (e) { flash(e.message, true); }
+  }
+
+  async function handleGetQr() {
+    try {
+      const r = await fetchJson(api('/api/evolution/qr'));
+      if (r.qrCode) {
+        setQrCode(r.qrCode);
+        flash('Escaneá el QR con WhatsApp → Dispositivos vinculados → Vincular un dispositivo.');
+      } else {
+        flash('No hay QR disponible. La instancia puede ya estar conectada.');
+      }
+    } catch (e) { flash(e.message, true); }
+  }
+
+  async function handleSync() {
+    try {
+      const r = await fetchJson(api('/api/google/sync'), { method: 'POST' });
+      flash(`Agenda sincronizada. Turnos actualizados: ${r.count}`);
+      await loadAll();
+    } catch (e) { flash(e.message, true); }
+  }
+
+  async function handleReminders() {
+    try {
+      const r = await fetchJson(api('/api/reminders/run'), { method: 'POST' });
+      flash(`Recordatorios enviados: ${r.processed}. Salteados: ${r.skipped}.`);
+      await loadAll();
+    } catch (e) { flash(e.message, true); }
+  }
+
+  async function handleDisconnectGoogle() {
+    try {
+      await fetchJson(api('/api/google/disconnect'), { method: 'POST' });
+      flash('Google Calendar desconectado.');
+      await loadAll();
+    } catch (e) { flash(e.message, true); }
+  }
+
+  async function handleSaveSettings(e) {
+    e.preventDefault();
     try {
       setSaving(true);
-      const json = await fetch(buildApiUrl('/api/settings'), {
+      const r = await fetchJson(api('/api/settings'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
-      }).then(parseResponse);
-      setSettings(json.settings);
-      setActionMessage('Configuración guardada.');
-    } catch (err) {
-      setError(err.message || 'No se pudo guardar');
-    } finally {
-      setSaving(false);
-    }
+      });
+      setSettings(r.settings);
+      flash('Configuración guardada.');
+    } catch (e) { flash(e.message, true); }
+    finally { setSaving(false); }
   }
 
-  async function postAndReload(path, successMessage) {
-    try {
-      const json = await fetch(buildApiUrl(path), { method: 'POST' }).then(parseResponse);
-      setActionMessage(successMessage || 'Acción ejecutada.');
-      await loadAll();
-      return json;
-    } catch (err) {
-      setError(err.message || 'No se pudo ejecutar la acción');
-      throw err;
-    }
-  }
-
-  async function prepareInstance() {
-    const json = await postAndReload('/api/evolution/ensure-instance', 'Instancia preparada.');
-    setActionMessage(`Instancia preparada. Webhook: ${json.webhookUrl || 'revisar APP_BASE_URL'}`);
-  }
-
-  async function loadQr() {
-    await postAndReload('/api/evolution/qr', 'QR actualizado.');
-  }
-
-  async function runSync() {
-    const json = await postAndReload('/api/google/sync', 'Agenda sincronizada.');
-    setActionMessage(`Agenda sincronizada. Eventos actualizados: ${json.count}`);
-  }
-
-  async function runReminders() {
-    const json = await postAndReload('/api/reminders/run', 'Cola de recordatorios procesada.');
-    setActionMessage(`Recordatorios enviados: ${json.processed}. Saltados: ${json.skipped}.`);
-  }
-
-  async function disconnectGoogle() {
-    await postAndReload('/api/google/disconnect', 'Google Calendar desconectado.');
-  }
-
-  async function sendManualReminder(event) {
-    event.preventDefault();
+  async function handleManualReminder(e) {
+    e.preventDefault();
     if (!selectedContact) return;
     try {
-      const json = await fetch(buildApiUrl('/api/reminders/send'), {
+      const r = await fetchJson(api('/api/reminders/send'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          waId: selectedContact.wa_id,
-          name: selectedContact.name,
-          when: reminderWhen,
-          text: customText
-        })
-      }).then(parseResponse);
-
-      setActionMessage(`Recordatorio enviado con delay de ${Math.round((json.delayMs || 0) / 1000)} segundos.`);
+        body: JSON.stringify({ waId: selectedContact.wa_id, name: selectedContact.name, when: reminderWhen, text: customText })
+      });
+      flash(`Recordatorio enviado (delay: ${Math.round((r.delayMs || 0) / 1000)}s).`);
       setCustomText('');
       await loadAll();
-    } catch (err) {
-      setError(err.message || 'No se pudo enviar el recordatorio');
-    }
+    } catch (e) { flash(e.message, true); }
   }
 
+  const inputStyle = { width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 14, boxSizing: 'border-box' };
+  const labelStyle = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, color: '#555' };
+
   return (
-    <main className="page">
-      <header className="hero">
-        <div>
-          <span className="eyebrow">Evolution QR + Google Calendar</span>
-          <h1>{config?.salonName || 'Emme Estetica'}</h1>
-          <p>
-            Panel para conectar QR, sincronizar Google Calendar y mandar recordatorios
-            solo a clientas existentes con pausas y límites diarios.
-          </p>
+    <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px 16px', fontFamily: 'system-ui, sans-serif', background: '#f9fafb', minHeight: '100vh' }}>
+      {/* Header */}
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#111' }}>
+          {settings?.salonName || 'Emme Estética'} — Recordatorios WhatsApp
+        </h1>
+        <p style={{ margin: '4px 0 0', color: '#666', fontSize: 14 }}>
+          Conecta WhatsApp vía QR, sincronizá Google Calendar y enviá recordatorios automáticos.
+        </p>
+      </div>
+
+      {/* Stats */}
+      {!loading && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
+          {[
+            { label: 'Próximos turnos', val: stats.upcoming, color: '#7c3aed' },
+            { label: 'Recordatorios enviados', val: stats.sent, color: '#22c55e' },
+            { label: 'Pendientes de envío', val: stats.pending, color: '#f59e0b' },
+            { label: 'Sin teléfono', val: stats.missingPhone, color: '#ef4444' },
+          ].map(s => (
+            <div key={s.label} style={{ background: '#fff', borderRadius: 10, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,.07)' }}>
+              <div style={{ fontSize: 26, fontWeight: 700, color: s.color }}>{s.val}</div>
+              <div style={{ fontSize: 12, color: '#777', marginTop: 2 }}>{s.label}</div>
+            </div>
+          ))}
         </div>
-        <a className="primary-link" href={config?.ownerLink || '#'} target="_blank" rel="noreferrer">
-          Abrir WhatsApp
-        </a>
-      </header>
+      )}
 
-      <section className="stats-grid">
-        <article className="stat-card"><span>Entrantes</span><strong>{totals.inbound}</strong></article>
-        <article className="stat-card"><span>Salientes</span><strong>{totals.outbound}</strong></article>
-        <article className="stat-card"><span>Contactos</span><strong>{totals.contacts}</strong></article>
-        <article className="stat-card"><span>Próximos turnos</span><strong>{totals.upcoming}</strong></article>
-      </section>
+      {msg && <div style={{ background: '#dcfce7', color: '#166534', padding: '10px 16px', borderRadius: 8, marginBottom: 16, fontSize: 14 }}>{msg}</div>}
+      {err && <div style={{ background: '#fee2e2', color: '#991b1b', padding: '10px 16px', borderRadius: 8, marginBottom: 16, fontSize: 14 }}>{err}</div>}
+      {loading && <p style={{ color: '#666', fontSize: 14 }}>Cargando panel...</p>}
 
-      {loading ? <p className="info">Cargando panel...</p> : null}
-      {actionMessage ? <p className="info">{actionMessage}</p> : null}
-      {error ? <p className="error">{error}</p> : null}
-
-      <SectionCard
+      {/* Conexiones */}
+      <Card
         title="Conexiones"
-        subtitle="Estado del QR y del calendario"
-        actions={
-          <div className="inline-actions">
-            <button className="secondary-button" onClick={prepareInstance}>Preparar instancia</button>
-            <button className="secondary-button" onClick={loadQr}>Obtener QR</button>
-          </div>
-        }
+        subtitle="Estado de WhatsApp y Google Calendar"
+        actions={<>
+          <Btn onClick={handlePrepare}>Preparar instancia</Btn>
+          <Btn onClick={handleGetQr}>Obtener QR</Btn>
+        </>}
       >
-        <div className="two-col-grid">
-          <div className="status-box">
-            <h3>Evolution QR</h3>
-            <p><strong>Instancia:</strong> {evolutionStatus?.instanceName || '-'}</p>
-            <p><strong>Estado:</strong> {evolutionStatus?.connection?.status || '-'}</p>
-            <p><strong>Webhook:</strong> {evolutionStatus?.webhookUrl || '-'}</p>
-            {evolutionStatus?.connection?.qrCode ? <p className="small-note">QR disponible en backend. Pedilo desde el endpoint /api/evolution/qr si necesitás inspección cruda.</p> : null}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+          {/* WhatsApp */}
+          <div style={{ background: '#f9fafb', borderRadius: 10, padding: 16 }}>
+            <h3 style={{ margin: '0 0 12px', fontSize: 15 }}>
+              <StatusDot ok={whatsappConnected} /> WhatsApp (Evolution API)
+            </h3>
+            <p style={{ margin: '0 0 4px', fontSize: 13 }}><b>Instancia:</b> {evolutionStatus?.instanceName || '-'}</p>
+            <p style={{ margin: '0 0 4px', fontSize: 13 }}>
+              <b>Estado:</b>{' '}
+              {whatsappConnected
+                ? <Badge color="green">conectado</Badge>
+                : <Badge color="red">{evolutionStatus?.connection?.status || 'desconectado'}</Badge>}
+            </p>
+            <p style={{ margin: '0 0 12px', fontSize: 13 }}><b>Webhook:</b> {evolutionStatus?.webhookUrl || '(configurá APP_BASE_URL)'}</p>
+
+            {qrCode && (
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ margin: '0 0 8px', fontSize: 12, color: '#666' }}>
+                  Escaneá con WhatsApp → Dispositivos vinculados → Vincular dispositivo
+                </p>
+                <img
+                  src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`}
+                  alt="QR WhatsApp"
+                  style={{ width: 200, height: 200, border: '4px solid #7c3aed', borderRadius: 8 }}
+                />
+              </div>
+            )}
+            {whatsappConnected && <p style={{ color: '#22c55e', fontSize: 13, fontWeight: 600 }}>✓ WhatsApp conectado y listo para enviar</p>}
           </div>
-          <div className="status-box">
-            <h3>Google Calendar</h3>
-            <p><strong>Conectado:</strong> {googleStatus?.state?.connected ? 'Sí' : 'No'}</p>
-            <p><strong>Calendario:</strong> {googleStatus?.state?.calendarId || '-'}</p>
-            <p><strong>Última sync:</strong> {googleStatus?.state?.lastSyncAt ? new Date(googleStatus.state.lastSyncAt).toLocaleString('es-AR') : '-'}</p>
-            <div className="inline-actions">
-              <a className="secondary-button link-button" href={buildApiUrl('/auth/google')}>Conectar Google</a>
-              <button className="secondary-button" onClick={runSync}>Sincronizar agenda</button>
-              <button className="secondary-button" onClick={disconnectGoogle}>Desconectar</button>
+
+          {/* Google Calendar */}
+          <div style={{ background: '#f9fafb', borderRadius: 10, padding: 16 }}>
+            <h3 style={{ margin: '0 0 12px', fontSize: 15 }}>
+              <StatusDot ok={googleConnected} /> Google Calendar
+            </h3>
+            <p style={{ margin: '0 0 4px', fontSize: 13 }}>
+              <b>Estado:</b>{' '}
+              {googleConnected ? <Badge color="green">conectado</Badge> : <Badge color="red">desconectado</Badge>}
+            </p>
+            {googleConnected && <>
+              <p style={{ margin: '0 0 4px', fontSize: 13 }}><b>Calendario:</b> {googleStatus?.state?.calendarId || 'primary'}</p>
+              <p style={{ margin: '0 0 12px', fontSize: 13 }}>
+                <b>Última sync:</b>{' '}
+                {googleStatus?.state?.lastSyncAt ? new Date(googleStatus.state.lastSyncAt).toLocaleString('es-AR') : '-'}
+              </p>
+            </>}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+              {!googleConnected
+                ? <a href={api('/auth/google')} style={{ padding: '8px 14px', background: '#7c3aed', color: '#fff', borderRadius: 8, textDecoration: 'none', fontSize: 13, fontWeight: 500 }}>Conectar Google</a>
+                : <>
+                  <Btn onClick={handleSync}>Sincronizar ahora</Btn>
+                  <Btn onClick={handleDisconnectGoogle}>Desconectar</Btn>
+                </>
+              }
             </div>
           </div>
         </div>
-      </SectionCard>
+      </Card>
 
-      <SectionCard
+      {/* Turnos */}
+      <Card
         title="Turnos del calendario"
-        subtitle="Se leen desde Google Calendar. Para enviar recordatorio automático, agregá un teléfono en el título o la descripción del evento."
-        actions={<button className="secondary-button" onClick={runReminders}>Procesar recordatorios ahora</button>}
+        subtitle="Los turnos se sincronizan automáticamente. El teléfono se lee del título o descripción del evento."
+        actions={<Btn onClick={handleReminders} primary>Enviar recordatorios ahora</Btn>}
       >
-        <div className="table-wrap">
-          <table>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Turno</th>
-                <th>Cliente</th>
-                <th>WhatsApp</th>
-                <th>Recordatorio</th>
-                <th>Enviado</th>
+              <tr style={{ borderBottom: '2px solid #f3f4f6', textAlign: 'left' }}>
+                {['Fecha', 'Turno', 'Cliente', 'WhatsApp', 'Recordatorio', 'Enviado'].map(h => (
+                  <th key={h} style={{ padding: '8px 10px', fontWeight: 600, color: '#555' }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {appointments.length ? appointments.map((item) => <AppointmentRow key={item.id} item={item} />) : (
-                <tr><td colSpan="6">Todavía no hay turnos sincronizados.</td></tr>
+              {appointments.length ? appointments.map(a => (
+                <tr key={a.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                  <td style={{ padding: '8px 10px' }}>{new Date(a.start_at).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                  <td style={{ padding: '8px 10px' }}>{a.summary}</td>
+                  <td style={{ padding: '8px 10px' }}>{a.contact_name || '-'}</td>
+                  <td style={{ padding: '8px 10px' }}>{a.contact_phone || '-'}</td>
+                  <td style={{ padding: '8px 10px' }}>{reminderBadge(a.reminder_status)}</td>
+                  <td style={{ padding: '8px 10px' }}>{a.reminder_sent_at ? new Date(a.reminder_sent_at).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }) : '-'}</td>
+                </tr>
+              )) : (
+                <tr><td colSpan={6} style={{ padding: 20, textAlign: 'center', color: '#999' }}>No hay turnos sincronizados todavía.</td></tr>
               )}
             </tbody>
           </table>
         </div>
-      </SectionCard>
+      </Card>
 
-      <SectionCard title="Recordatorio manual" subtitle="Usa solo contactos que ya escribieron." >
-        <div className="contacts-layout">
-          <div className="contacts-list">
-            {contacts.length ? contacts.map((contact) => (
-              <ContactRow key={contact.id} contact={contact} onSelect={setSelectedContact} />
-            )) : <p className="info">Todavía no hay contactos.</p>}
+      {/* Recordatorio manual */}
+      <Card title="Recordatorio manual" subtitle="Elegí un contacto y enviá un mensaje personalizado.">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+          <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 8 }}>
+            {contacts.length ? contacts.map(c => (
+              <button key={c.id} onClick={() => setSelectedContact(c)} style={{
+                width: '100%', textAlign: 'left', padding: '10px 14px', border: 'none', borderBottom: '1px solid #f3f4f6',
+                background: selectedContact?.id === c.id ? '#f5f3ff' : 'transparent', cursor: 'pointer'
+              }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name || 'Sin nombre'}</div>
+                <div style={{ fontSize: 12, color: '#666' }}>{c.wa_id}</div>
+              </button>
+            )) : <p style={{ padding: 16, color: '#999', fontSize: 13 }}>Todavía no hay contactos.</p>}
           </div>
-          <form className="reminder-panel" onSubmit={sendManualReminder}>
-            <h3>{selectedContact ? `Enviar a ${selectedContact.name || selectedContact.wa_id}` : 'Elegí un contacto'}</h3>
-            <label>
-              <span>Cuándo</span>
-              <input value={reminderWhen} onChange={(e) => setReminderWhen(e.target.value)} placeholder="mañana a las 15:00" />
+          <form onSubmit={handleManualReminder} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 14 }}>
+              {selectedContact ? `Enviar a ${selectedContact.name || selectedContact.wa_id}` : 'Seleccioná un contacto'}
+            </h3>
+            <label style={labelStyle}>
+              Cuándo
+              <input style={inputStyle} value={reminderWhen} onChange={e => setReminderWhen(e.target.value)} placeholder="mañana a las 15:00" />
             </label>
-            <label>
-              <span>Texto personalizado</span>
-              <textarea rows="5" value={customText} onChange={(e) => setCustomText(e.target.value)} placeholder="Opcional. Si lo dejás vacío, usa la plantilla del sistema." />
+            <label style={labelStyle}>
+              Texto personalizado (opcional)
+              <textarea style={{ ...inputStyle, resize: 'vertical' }} rows={4} value={customText}
+                onChange={e => setCustomText(e.target.value)}
+                placeholder="Si lo dejás vacío usa la plantilla configurada." />
             </label>
-            <button className="primary-button" disabled={!selectedContact}>Enviar recordatorio</button>
+            <Btn primary disabled={!selectedContact}>Enviar recordatorio</Btn>
           </form>
         </div>
-      </SectionCard>
+      </Card>
 
-      <SectionCard title="Configuración" subtitle="Horarios, reglas y plantilla de recordatorio">
-        <SettingsForm
-          settings={settings}
-          onChange={(path, value) => setSettings((current) => updateNested(current, path, value))}
-          onSave={saveSettings}
-          saving={saving}
-        />
-      </SectionCard>
+      {/* Configuración */}
+      <Card title="Configuración" subtitle="Ajustá los parámetros del sistema de recordatorios.">
+        {settings && (
+          <form onSubmit={handleSaveSettings} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {[
+                ['Nombre del salón', 'salonName', 'text'],
+                ['Atiende (nombre bot)', 'ownerDisplayName', 'text'],
+                ['WhatsApp del negocio', 'ownerWhatsAppNumber', 'text'],
+                ['Horas antes del recordatorio', 'reminderHoursBefore', 'number'],
+                ['Límite diario de recordatorios', 'dailyReminderLimit', 'number'],
+                ['Pausa mínima entre mensajes (seg)', 'minDelaySeconds', 'number'],
+                ['Pausa máxima entre mensajes (seg)', 'maxDelaySeconds', 'number'],
+                ['Sincronizar calendario cada (min)', 'syncEveryMinutes', 'number'],
+              ].map(([label, key, type]) => (
+                <label key={key} style={labelStyle}>
+                  {label}
+                  <input style={inputStyle} type={type} value={settings[key] ?? ''}
+                    onChange={e => setSettings(s => ({ ...s, [key]: type === 'number' ? Number(e.target.value) : e.target.value }))} />
+                </label>
+              ))}
+            </div>
 
-      <SectionCard title="Últimos mensajes" subtitle="Entrantes, salientes y estados del bot">
-        <div className="timeline-grid">
-          {interactions.length ? interactions.slice(0, 24).map((item) => <TimelineItem key={item.id} item={item} />) : <p className="info">Todavía no hay actividad.</p>}
-        </div>
-      </SectionCard>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              {[
+                ['Recordatorios activados', 'botEnabled'],
+                ['Solo contactos existentes', 'onlyExistingContacts'],
+              ].map(([label, key]) => (
+                <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={Boolean(settings[key])}
+                    onChange={e => setSettings(s => ({ ...s, [key]: e.target.checked }))} />
+                  {label}
+                </label>
+              ))}
+            </div>
 
-      <SectionCard title="Eventos crudos" subtitle="Debug de webhooks y sincronizaciones">
-        <div className="events-list">
-          {events.length ? events.map((event) => (
-            <details key={event.id} className="event-item">
-              <summary>
-                <span>{new Date(event.created_at).toLocaleString('es-AR')}</span>
-                <strong>{event.event_type}</strong>
-              </summary>
-              <pre>{event.payload}</pre>
-            </details>
-          )) : <p className="info">Todavía no llegaron eventos.</p>}
-        </div>
-      </SectionCard>
-    </main>
+            <label style={labelStyle}>
+              Plantilla del recordatorio
+              <p style={{ margin: '0 0 4px', fontSize: 12, color: '#888' }}>Variables disponibles: {'{name}'} {'{salon}'} {'{when}'}</p>
+              <textarea style={{ ...inputStyle, resize: 'vertical' }} rows={3} value={settings.reminderTemplate || ''}
+                onChange={e => setSettings(s => ({ ...s, reminderTemplate: e.target.value }))} />
+            </label>
+
+            <Btn primary disabled={saving}>{saving ? 'Guardando...' : 'Guardar configuración'}</Btn>
+          </form>
+        )}
+      </Card>
+
+      {/* Últimos mensajes */}
+      <Card title="Últimos mensajes enviados" subtitle="Historial de recordatorios y actividad del bot.">
+        {interactions.filter(i => i.direction === 'outbound').slice(0, 20).map(i => (
+          <div key={i.id} style={{ borderBottom: '1px solid #f3f4f6', padding: '10px 0', fontSize: 13 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <strong>{i.customer_name || i.customer_wa_id || '-'}</strong>
+              <span style={{ color: '#888', fontSize: 12 }}>{new Date(i.created_at).toLocaleString('es-AR')}</span>
+            </div>
+            <p style={{ margin: 0, color: '#555' }}>{i.message_preview || '-'}</p>
+          </div>
+        ))}
+        {interactions.filter(i => i.direction === 'outbound').length === 0 && (
+          <p style={{ color: '#999', fontSize: 13 }}>Todavía no se enviaron mensajes.</p>
+        )}
+      </Card>
+    </div>
   );
 }
